@@ -6,6 +6,9 @@ from pathlib import Path
 import duckdb
 
 from astock_lifespan_alpha.malf import run_malf_day_build, run_malf_month_build, run_malf_week_build
+from astock_lifespan_alpha.malf.source import load_source_bars
+from astock_lifespan_alpha.core.paths import default_settings
+from astock_lifespan_alpha.malf.contracts import Timeframe
 from astock_lifespan_alpha.malf.schema import MALF_TABLES
 
 
@@ -113,6 +116,37 @@ def test_malf_runner_checkpoint_skips_unchanged_source(monkeypatch, tmp_path):
     assert snapshot_count == 5
 
 
+def test_malf_source_reads_real_stock_adjusted_timeframe_databases(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_adjusted_bars(
+        workspace / "data" / "base" / "market_base.duckdb",
+        "stock_daily_adjusted",
+        [("AAA", "2026-01-02", 10.0, 11.0, 9.5, 10.8)],
+    )
+    _write_stock_adjusted_bars(
+        workspace / "data" / "base" / "market_base_week.duckdb",
+        "stock_weekly_adjusted",
+        [("AAA", "2026-01-09", 10.8, 12.0, 10.0, 11.5)],
+    )
+    _write_stock_adjusted_bars(
+        workspace / "data" / "base" / "market_base_month.duckdb",
+        "stock_monthly_adjusted",
+        [("AAA", "2026-01-31", 11.5, 13.0, 10.8, 12.2)],
+    )
+
+    settings = default_settings(repo_root=workspace / "repo")
+    day_source = load_source_bars(settings, Timeframe.DAY)
+    week_source = load_source_bars(settings, Timeframe.WEEK)
+    month_source = load_source_bars(settings, Timeframe.MONTH)
+
+    assert day_source.source_path == workspace / "data" / "base" / "market_base.duckdb"
+    assert week_source.source_path == workspace / "data" / "base" / "market_base_week.duckdb"
+    assert month_source.source_path == workspace / "data" / "base" / "market_base_month.duckdb"
+    assert day_source.bars_by_symbol["AAA"][0].bar_dt.date().isoformat() == "2026-01-02"
+    assert week_source.bars_by_symbol["AAA"][0].bar_dt.date().isoformat() == "2026-01-09"
+    assert month_source.bars_by_symbol["AAA"][0].bar_dt.date().isoformat() == "2026-01-31"
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
@@ -151,4 +185,30 @@ def _append_day_source_bars(database_path: Path, rows: list[tuple[str, str, floa
         connection.executemany(
             "INSERT INTO market_base_day VALUES (?, ?, ?, ?, ?, ?)",
             [(symbol, datetime.fromisoformat(bar_dt), open_price, high_price, low_price, close_price) for symbol, bar_dt, open_price, high_price, low_price, close_price in rows],
+        )
+
+
+def _write_stock_adjusted_bars(
+    database_path: Path,
+    table_name: str,
+    rows: list[tuple[str, str, float, float, float, float]],
+) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                code TEXT,
+                trade_date DATE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE
+            )
+            """
+        )
+        connection.executemany(
+            f"INSERT INTO {table_name} VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
         )

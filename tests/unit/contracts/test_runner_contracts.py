@@ -13,7 +13,15 @@ from astock_lifespan_alpha.portfolio_plan import run_portfolio_plan_build
 from astock_lifespan_alpha.position import run_position_from_alpha_signal
 
 
-def test_foundation_runner_names_are_stable():
+def test_foundation_runner_names_are_stable(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
+    monkeypatch.setenv("LIFESPAN_DATA_ROOT", str(workspace / "data"))
+    monkeypatch.setenv("LIFESPAN_REPORT_ROOT", str(workspace / "report"))
+    monkeypatch.setenv("LIFESPAN_TEMP_ROOT", str(workspace / "temp"))
+    monkeypatch.setenv("LIFESPAN_VALIDATED_ROOT", str(workspace / "validated"))
+    (workspace / "repo").mkdir(parents=True, exist_ok=True)
+
     malf_summaries = [
         run_malf_day_build(),
         run_malf_week_build(),

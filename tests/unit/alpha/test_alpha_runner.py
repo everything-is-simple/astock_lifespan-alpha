@@ -13,6 +13,8 @@ from astock_lifespan_alpha.alpha import (
     run_alpha_signal_build,
     run_alpha_tst_build,
 )
+from astock_lifespan_alpha.alpha.source import load_alpha_source_rows
+from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.alpha.schema import SIGNAL_TABLES, TRIGGER_TABLES
 
 
@@ -107,6 +109,19 @@ def test_alpha_runner_checkpoint_skips_unchanged_source(monkeypatch, tmp_path):
     assert second_signal.checkpoint_summary.work_units_updated == 0
 
 
+def test_alpha_source_reads_stock_daily_adjusted_code_trade_date(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_daily_adjusted(workspace / "data" / "base" / "market_base.duckdb")
+    _write_malf_day_snapshot(workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb")
+
+    dataset = load_alpha_source_rows(default_settings(repo_root=workspace / "repo"))
+
+    assert dataset.market_source_path == workspace / "data" / "base" / "market_base.duckdb"
+    assert dataset.row_count == 6
+    assert dataset.rows_by_symbol["AAA"][0].symbol == "AAA"
+    assert dataset.rows_by_symbol["AAA"][0].signal_date == date(2026, 1, 2)
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
@@ -148,6 +163,36 @@ def _write_market_base_day(database_path: Path) -> None:
                 (symbol, datetime.fromisoformat(bar_dt), open_price, high_price, low_price, close_price)
                 for symbol, bar_dt, open_price, high_price, low_price, close_price in rows
             ],
+        )
+
+
+def _write_stock_daily_adjusted(database_path: Path) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        ("AAA", date(2026, 1, 2), 10.0, 11.0, 9.5, 10.8),
+        ("AAA", date(2026, 1, 3), 10.8, 12.2, 10.1, 11.2),
+        ("AAA", date(2026, 1, 4), 12.0, 12.4, 11.8, 12.3),
+        ("AAA", date(2026, 1, 5), 12.4, 12.5, 11.9, 12.0),
+        ("AAA", date(2026, 1, 6), 12.0, 12.3, 11.95, 12.2),
+        ("AAA", date(2026, 1, 7), 12.0, 12.1, 11.4, 11.5),
+    ]
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DROP TABLE IF EXISTS stock_daily_adjusted")
+        connection.execute(
+            """
+            CREATE TABLE stock_daily_adjusted (
+                code TEXT,
+                trade_date DATE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO stock_daily_adjusted VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
         )
 
 

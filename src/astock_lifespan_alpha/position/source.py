@@ -13,7 +13,7 @@ from astock_lifespan_alpha.core.paths import WorkspaceRoots
 from astock_lifespan_alpha.position.contracts import PositionInputRow
 
 
-DAY_TABLE_CANDIDATES = ("market_base_day", "bars_day", "price_bar_day", "market_day")
+DAY_TABLE_CANDIDATES = ("stock_daily_adjusted", "market_base_day", "bars_day", "price_bar_day", "market_day")
 
 
 @dataclass(frozen=True)
@@ -137,10 +137,11 @@ def _load_market_rows(database_path: Path) -> list[dict[str, object]]:
             column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
             column_names = {row[1] for row in column_info}
             date_column = _pick_required_column(column_names, ("bar_dt", "trade_date", "date"))
+            symbol_column = _pick_required_column(column_names, ("symbol", "code"))
             rows = connection.execute(
                 f"""
                 SELECT
-                    symbol,
+                    {symbol_column} AS symbol,
                     CAST({date_column} AS DATE) AS trade_date,
                     CAST(close AS DOUBLE) AS close
                 FROM {table_name}

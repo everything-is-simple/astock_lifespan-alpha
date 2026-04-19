@@ -14,9 +14,30 @@ from astock_lifespan_alpha.core.paths import WorkspaceRoots
 from astock_lifespan_alpha.malf.contracts import OhlcBar, Timeframe
 
 
-DAY_TABLE_CANDIDATES = ("market_base_day", "bars_day", "price_bar_day", "market_day")
-WEEK_TABLE_CANDIDATES = ("market_base_week", "bars_week", "price_bar_week", "market_week")
-MONTH_TABLE_CANDIDATES = ("market_base_month", "bars_month", "price_bar_month", "market_month")
+DAY_TABLE_CANDIDATES = (
+    "stock_daily_adjusted",
+    "market_base_day",
+    "bars_day",
+    "price_bar_day",
+    "market_day",
+    "stock_daily_bar",
+)
+WEEK_TABLE_CANDIDATES = (
+    "stock_weekly_adjusted",
+    "market_base_week",
+    "bars_week",
+    "price_bar_week",
+    "market_week",
+    "stock_weekly_bar",
+)
+MONTH_TABLE_CANDIDATES = (
+    "stock_monthly_adjusted",
+    "market_base_month",
+    "bars_month",
+    "price_bar_month",
+    "market_month",
+    "stock_monthly_bar",
+)
 
 
 @dataclass(frozen=True)
@@ -39,18 +60,25 @@ def load_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> SourceBa
         Timeframe.WEEK: WEEK_TABLE_CANDIDATES,
         Timeframe.MONTH: MONTH_TABLE_CANDIDATES,
     }[timeframe]
-    for database_path in (settings.source_databases.market_base, settings.source_databases.raw_market):
+    database_paths = {
+        Timeframe.DAY: (settings.source_databases.market_base, settings.source_databases.raw_market),
+        Timeframe.WEEK: (settings.source_databases.market_base_week, settings.source_databases.raw_market_week),
+        Timeframe.MONTH: (settings.source_databases.market_base_month, settings.source_databases.raw_market_month),
+    }[timeframe]
+    for database_path in database_paths:
         if not database_path.exists():
             continue
         direct_rows = _load_rows_from_database(database_path, direct_candidates)
         if direct_rows:
             return SourceBars(source_path=database_path, bars_by_symbol=_group_rows_by_symbol(direct_rows))
-        if timeframe is Timeframe.DAY:
-            continue
-        day_rows = _load_rows_from_database(database_path, DAY_TABLE_CANDIDATES)
-        if day_rows:
-            aggregated_rows = _aggregate_rows(day_rows, timeframe)
-            return SourceBars(source_path=database_path, bars_by_symbol=_group_rows_by_symbol(aggregated_rows))
+    if timeframe is not Timeframe.DAY:
+        for database_path in (settings.source_databases.market_base, settings.source_databases.raw_market):
+            if not database_path.exists():
+                continue
+            day_rows = _load_rows_from_database(database_path, DAY_TABLE_CANDIDATES)
+            if day_rows:
+                aggregated_rows = _aggregate_rows(day_rows, timeframe)
+                return SourceBars(source_path=database_path, bars_by_symbol=_group_rows_by_symbol(aggregated_rows))
     return SourceBars(source_path=None, bars_by_symbol={})
 
 
@@ -68,7 +96,7 @@ def _query_ohlc_rows(connection: duckdb.DuckDBPyConnection, table_name: str) -> 
     column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
     column_names = {row[1] for row in column_info}
     date_column = _pick_required_column(column_names, ("bar_dt", "trade_date", "date"))
-    symbol_column = _pick_required_column(column_names, ("symbol",))
+    symbol_column = _pick_required_column(column_names, ("symbol", "code"))
     open_column = _pick_required_column(column_names, ("open",))
     high_column = _pick_required_column(column_names, ("high",))
     low_column = _pick_required_column(column_names, ("low",))

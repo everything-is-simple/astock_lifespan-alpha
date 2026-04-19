@@ -5,9 +5,11 @@ from pathlib import Path
 
 import duckdb
 
+from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_plan_schema
 from astock_lifespan_alpha.trade import TradeRunSummary, run_trade_from_portfolio_plan
 from astock_lifespan_alpha.trade.schema import TRADE_TABLES, initialize_trade_schema
+from astock_lifespan_alpha.trade.source import load_trade_source_rows
 
 
 def test_trade_schema_initializes_formal_tables(tmp_path):
@@ -234,6 +236,23 @@ def test_trade_runner_reuses_same_input_and_rematerializes_changed_work_unit(mon
     assert execution_weight == 0.05
 
 
+def test_trade_source_reads_stock_daily_adjusted_code_trade_date(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_daily_adjusted(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", date(2026, 1, 3), 10.0),
+            ("AAA", date(2026, 1, 4), 11.1),
+        ],
+    )
+
+    dataset = load_trade_source_rows(settings=default_settings(repo_root=workspace / "repo"), portfolio_id="core")
+
+    assert dataset.execution_price_source_path == workspace / "data" / "base" / "market_base.duckdb"
+    assert dataset.execution_prices_by_symbol["AAA"][0].trade_date == date(2026, 1, 3)
+    assert dataset.execution_prices_by_symbol["AAA"][1].open_price == 11.1
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
@@ -266,6 +285,31 @@ def _write_market_base_day(database_path: Path, rows: list[tuple[str, str, float
             [
                 (symbol, datetime.fromisoformat(bar_dt), open_price, open_price, open_price, open_price)
                 for symbol, bar_dt, open_price in rows
+            ],
+        )
+
+
+def _write_stock_daily_adjusted(database_path: Path, rows: list[tuple[str, date, float | None]]) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DROP TABLE IF EXISTS stock_daily_adjusted")
+        connection.execute(
+            """
+            CREATE TABLE stock_daily_adjusted (
+                code TEXT,
+                trade_date DATE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO stock_daily_adjusted VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (symbol, trade_date, open_price, open_price, open_price, open_price)
+                for symbol, trade_date, open_price in rows
             ],
         )
 

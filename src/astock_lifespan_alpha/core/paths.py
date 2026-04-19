@@ -36,11 +36,19 @@ class SourceFactDatabasePaths:
 
     raw_market: Path
     market_base: Path
+    raw_market_week: Path
+    raw_market_month: Path
+    market_base_week: Path
+    market_base_month: Path
 
     def as_dict(self) -> dict[str, Path]:
         return {
             "raw_market": self.raw_market,
+            "raw_market_week": self.raw_market_week,
+            "raw_market_month": self.raw_market_month,
             "market_base": self.market_base,
+            "market_base_week": self.market_base_week,
+            "market_base_month": self.market_base_month,
         }
 
 
@@ -96,6 +104,10 @@ class WorkspaceRoots:
         return SourceFactDatabasePaths(
             raw_market=self.data_root / "raw" / "raw_market.duckdb",
             market_base=self.data_root / "base" / "market_base.duckdb",
+            raw_market_week=self.data_root / "raw" / "raw_market_week.duckdb",
+            raw_market_month=self.data_root / "raw" / "raw_market_month.duckdb",
+            market_base_week=self.data_root / "base" / "market_base_week.duckdb",
+            market_base_month=self.data_root / "base" / "market_base_month.duckdb",
         )
 
     @property
@@ -176,4 +188,3 @@ def default_settings(repo_root: Path | None = None) -> WorkspaceRoots:
         temp_root=temp_root,
         validated_root=validated_root,
     )
-
