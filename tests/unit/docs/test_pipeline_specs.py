@@ -48,3 +48,32 @@ def test_stage_eight_pipeline_spec_freeze_is_registered():
     for term in required_terms:
         assert term in combined
 
+
+def test_stage_eight_pipeline_engineering_closeout_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root
+        / "docs"
+        / "03-execution"
+        / "31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{docs_index}\n{readme}\n{conclusion}"
+    required_terms = [
+        "`31` 阶段八 data -> system pipeline 编排工程收口",
+        "`docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`",
+        "`run_data_to_system_pipeline`",
+        "`pipeline_run / pipeline_step_run`",
+        "阶段八完成",
+        "下一阶段待规划",
+        "只调用 public runner",
+        "不直接写业务表",
+    ]
+
+    for term in required_terms:
+        assert term in combined

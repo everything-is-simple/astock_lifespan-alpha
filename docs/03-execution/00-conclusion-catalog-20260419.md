@@ -188,3 +188,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段八 `stage-eight-pipeline` 已冻结，`data -> system` 最小 pipeline 编排边界、固定 runner 顺序和不直接写业务表规则已登记；阶段八规格冻结，工程待实施。
+
+### `31` 阶段八 data -> system pipeline 编排工程收口
+
+- 结论文件：`docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段八 `run_data_to_system_pipeline` 与 `pipeline_run / pipeline_step_run` 已落地；阶段八完成，下一阶段待规划。

@@ -37,6 +37,7 @@ card -> evidence -> record -> conclusion
 17. `docs/02-spec/13-data-to-system-minimal-pipeline-orchestration-spec-v1-20260419.md`
 18. `docs/03-execution/README.md`
 19. `docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
+20. `docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -76,7 +77,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段七 data 源事实契约对齐，并已冻结阶段八 `data -> system` 最小 pipeline 编排规格。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段八工程收口。
 
 这意味着：
 
@@ -94,6 +95,8 @@ card -> evidence -> record -> conclusion
 - `malf / alpha / position / trade` source adapter 已支持真实 stock adjusted 表
 - 阶段八规格冻结闭环 `30` 已补齐
 - `stage-eight-pipeline` 已冻结 `data -> system` 最小 pipeline 编排边界
+- 阶段八工程收口闭环 `31` 已补齐
+- `run_data_to_system_pipeline` 与 `pipeline_run / pipeline_step_run` 已落地
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -124,5 +127,5 @@ Stage-five engineering defaults are frozen:
 阶段八 pipeline 规格：
 - 文档标识：`stage-eight-pipeline`
 - 主题：`data -> system` 最小 pipeline orchestration
-- 裁决：阶段八规格冻结，工程待实施
+- 裁决：阶段八完成，下一阶段待规划
 - 边界：pipeline 只调用 public runner，不直接写业务表

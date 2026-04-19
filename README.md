@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段七 data 源事实契约对齐；阶段八 `data -> system` 最小 pipeline 编排规格已冻结，工程待实施。重点是：
+当前已完成阶段八 `data -> system` 最小 pipeline orchestration；下一阶段待规划。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -38,12 +38,14 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - `malf / alpha / position / trade` source adapter 已支持真实 stock adjusted 表
 - 阶段八规格冻结闭环 `30` 已补齐
 - 阶段八主线固定为 `data -> system` 最小 pipeline orchestration
+- 阶段八工程收口闭环 `31` 已补齐
+- `run_data_to_system_pipeline` 与 `pipeline_run / pipeline_step_run` 已落地
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经成立；阶段八 `data -> system` pipeline 规格已冻结，工程待实施。
+> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段八完成，下一阶段待规划。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -90,6 +92,11 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 文档标识：`stage-eight-pipeline`
 - 主题：最小 pipeline orchestration
 - 边界：只调用 public runner 并记录 step summary，不直接写业务表
+
+阶段八 data -> system pipeline 工程已完成：
+- `run_data_to_system_pipeline`
+- `pipeline_run / pipeline_step_run`
+- 收口结论：`docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
 
 ## 文档入口
 
