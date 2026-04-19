@@ -22,9 +22,11 @@ card -> evidence -> record -> conclusion
 2. `docs/01-design/00-foundation-bootstrap-design-notes-20260419.md`
 3. `docs/02-spec/01-doc-governance-and-execution-spec-20260419.md`
 4. `docs/02-spec/00-astock-lifespan-alpha-reconstruction-master-plan-v1-20260419.md`
-5. `docs/03-execution/README.md`
-6. `docs/03-execution/01-foundation-bootstrap-card-20260419.md`
-7. `docs/03-execution/01-foundation-bootstrap-conclusion-20260419.md`
+5. `docs/02-spec/01-malf-wave-scale-semantic-spec-v1-placeholder-20260419.md`
+6. `docs/02-spec/02-malf-wave-scale-diagram-edition-placeholder-20260419.md`
+7. `docs/03-execution/README.md`
+8. `docs/03-execution/06-malf-alpha-facing-outputs-conclusion-20260419.md`
+9. `docs/03-execution/07-stage-two-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -64,10 +66,10 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经补回阶段一基础重构的治理闭环。
+当前仓库已经完成阶段二 `MALF` 冻结与构建，并进入本地收口阶段。
 
 这意味着：
 
-- 第一阶段实际交付范围已经被正式记录
-- 后续阶段不再默认允许“先改代码，后补文档”
-- 后续 `MALF / alpha / position` 重构应继续沿用同样的执行纪律
+- 阶段一与阶段二的实际交付范围都已经进入正式治理闭环
+- `MALF` 已具备正式文本规格、图版口径、三周期账本、runner 与 `alpha` 读取面
+- 阶段三 `alpha` 尚未开始实施，后续仍必须沿用同样的执行纪律

@@ -42,3 +42,9 @@ card -> evidence -> record -> conclusion
 当前已补齐批次：
 
 - `01` 阶段一基础重构
+- `02` MALF 文本规格冻结
+- `03` MALF 图版规格冻结
+- `04` MALF 契约与 Schema
+- `05` MALF 语义引擎与 Runner
+- `06` MALF 面向 Alpha 输出
+- `07` 阶段二本地收口

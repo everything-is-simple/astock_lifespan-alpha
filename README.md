@@ -18,19 +18,19 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段一基础重构，重点是：
+当前已完成阶段二 `MALF` 冻结与构建，重点是：
 
-- 独立仓库与独立环境
-- 五根目录工作区契约
-- 新账本命名空间 `astock_lifespan_alpha`
-- `malf / alpha / position` 的最小 runner stub
-- 文档治理闭环恢复
+- `MALF` 文本规格与图版规格正式冻结
+- `malf_day / malf_week / malf_month` 三周期正式账本已建立
+- `MALF` runner、queue、checkpoint 与 rebuild flow 已落地
+- `malf_wave_scale_snapshot / malf_wave_scale_profile` 已形成 `alpha` 可读输入面
+- 阶段二执行闭环 `02-06` 已补齐
 
 这不代表业务逻辑已经实现完成。
 
 当前阶段更准确的含义是：
 
-> 新系统底盘已经成立，后续 `MALF / alpha / position` 等模块可以在正式治理下继续重构
+> `MALF` 作为正式市场结构真值层已经成立，下一阶段将进入 `alpha` 五账本与 `alpha_signal` 的正式重构
 
 ## 文档入口
 
