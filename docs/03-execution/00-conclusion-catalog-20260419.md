@@ -194,3 +194,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段八 `run_data_to_system_pipeline` 与 `pipeline_run / pipeline_step_run` 已落地；阶段八完成，下一阶段待规划。
+
+### `32` 阶段九真实建库演练规格冻结
+
+- 结论文件：`docs/03-execution/32-real-data-build-rehearsal-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段九 `stage-nine-real-data-build` 已冻结，真实 `H:\Lifespan-data` 的 `module-by-module build`、`pipeline replay` 与 `Go+DuckDB deferred` 边界已登记；阶段九规格冻结，真实建库待执行。

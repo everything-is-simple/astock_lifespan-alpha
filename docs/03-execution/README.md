@@ -72,6 +72,7 @@ card -> evidence -> record -> conclusion
 - `29` 阶段七 data 源事实契约工程收口
 - `30` 阶段八 data -> system pipeline 编排规格冻结
 - `31` 阶段八 data -> system pipeline 编排工程收口
+- `32` 阶段九真实建库演练规格冻结
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -88,4 +89,5 @@ Stage-five implementation defaults are frozen for engineering:
 - 阶段七完成。
 - `stage-eight-pipeline` 已冻结。
 - 阶段八完成。
-- 下一阶段待规划。
+- `stage-nine-real-data-build` 已冻结。
+- 阶段九真实建库待执行。
