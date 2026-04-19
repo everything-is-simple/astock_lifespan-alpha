@@ -87,3 +87,45 @@
 - 结论文件：`docs/03-execution/14-stage-three-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段三 `08-13` 已完成本地收口，后续可进入阶段四 `position` 规划与实施。
+
+### `15` alpha_signal -> position 桥接规格冻结
+
+- 结论文件：`docs/03-execution/15-alpha-signal-to-position-bridge-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段四 `alpha_signal -> position` 的唯一正式桥接合同已经冻结，后续实现不得回引旧仓 admission 字段。
+
+### `16` position 最小账本与 runner 规格冻结
+
+- 结论文件：`docs/03-execution/16-position-minimal-ledger-and-runner-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段四 `position` 六张正式表、最小状态口径和 `run_position_from_alpha_signal` 合同已经冻结。
+
+### `17` portfolio_plan 最小桥接规格冻结
+
+- 结论文件：`docs/03-execution/17-portfolio-plan-minimal-bridge-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段四 `position -> portfolio_plan` 的最小桥接规格已经冻结，组合层最小三表与裁决规则已经明确。
+
+### `18` 阶段四文档总收口
+
+- 结论文件：`docs/03-execution/18-stage-four-document-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段四 `15-17` 的文档准入面已经建立完成，之后才允许进入代码实施。
+
+### `19` position 契约、Schema 与 runner
+
+- 结论文件：`docs/03-execution/19-position-contracts-schema-and-runner-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：`position` 已从 foundation stub 升级为正式 runner，并建立六张正式表。
+
+### `20` position 物化与最小 portfolio_plan bridge
+
+- 结论文件：`docs/03-execution/20-position-materialization-and-portfolio-bridge-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段四最小主线 `alpha_signal -> position -> portfolio_plan` 已经打通。
+
+### `21` 阶段四本地收口
+
+- 结论文件：`docs/03-execution/21-stage-four-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段四 `15-20` 已经完成收口，后续可以进入阶段五 `trade` 规划与实施。

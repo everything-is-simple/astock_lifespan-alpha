@@ -55,3 +55,10 @@ card -> evidence -> record -> conclusion
 - `12` Alpha 输入适配与共享骨架
 - `13` Alpha 五触发器与 alpha_signal
 - `14` 阶段三本地收口
+- `15` alpha_signal -> position 桥接规格冻结
+- `16` position 最小账本与 runner 规格冻结
+- `17` portfolio_plan 最小桥接规格冻结
+- `18` 阶段四文档总收口
+- `19` position 契约、Schema 与 runner
+- `20` position 物化与最小 portfolio_plan bridge
+- `21` 阶段四本地收口

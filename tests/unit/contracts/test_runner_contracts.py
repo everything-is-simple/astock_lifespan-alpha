@@ -9,6 +9,7 @@ from astock_lifespan_alpha.alpha import (
     run_alpha_tst_build,
 )
 from astock_lifespan_alpha.malf import run_malf_day_build, run_malf_month_build, run_malf_week_build
+from astock_lifespan_alpha.portfolio_plan import run_portfolio_plan_build
 from astock_lifespan_alpha.position import run_position_from_alpha_signal
 
 
@@ -26,11 +27,12 @@ def test_foundation_runner_names_are_stable():
         run_alpha_bpb_build(),
         run_alpha_signal_build(),
     ]
-    stub_summaries = [
+    stage_four_summaries = [
         run_position_from_alpha_signal(),
+        run_portfolio_plan_build(),
     ]
 
-    assert [summary.runner_name for summary in malf_summaries + alpha_summaries + stub_summaries] == [
+    assert [summary.runner_name for summary in malf_summaries + alpha_summaries + stage_four_summaries] == [
         "run_malf_day_build",
         "run_malf_week_build",
         "run_malf_month_build",
@@ -41,6 +43,7 @@ def test_foundation_runner_names_are_stable():
         "run_alpha_bpb_build",
         "run_alpha_signal_build",
         "run_position_from_alpha_signal",
+        "run_portfolio_plan_build",
     ]
     assert [summary.timeframe for summary in malf_summaries] == ["day", "week", "month"]
     assert all(summary.status == "completed" for summary in malf_summaries)
@@ -55,5 +58,5 @@ def test_foundation_runner_names_are_stable():
     ]
     assert all(summary.status == "completed" for summary in alpha_summaries)
     assert all("phase" not in summary.as_dict() for summary in alpha_summaries)
-    assert all(summary.status == "stub" for summary in stub_summaries)
-    assert all(summary.phase == "foundation_bootstrap" for summary in stub_summaries)
+    assert all(summary.status == "completed" for summary in stage_four_summaries)
+    assert all("phase" not in summary.as_dict() for summary in stage_four_summaries)

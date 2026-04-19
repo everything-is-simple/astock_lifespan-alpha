@@ -18,19 +18,19 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段三 `alpha` 五账本与 `alpha_signal`，重点是：
+当前已完成阶段四 `position` 接口切换与 `portfolio_plan` 最小桥接，重点是：
 
-- 五个 PAS trigger 正式规格与 `alpha_signal` 汇总规格已冻结
-- `alpha_bof / tst / pb / cpb / bpb / alpha_signal` 账本已建立
-- 六个 alpha runner、共享输入层、queue、checkpoint 与 replay 骨架已落地
-- `alpha_signal` 已形成阶段四 `position` 可读输入面
-- 阶段三执行闭环 `08-14` 已补齐
+- `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
+- `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
+- `position_candidate_audit / position_capacity_snapshot / position_sizing_snapshot` 已形成正式输出
+- `run_portfolio_plan_build` 与 `portfolio_plan_run / snapshot / run_snapshot` 已落地
+- 阶段四执行闭环 `15-21` 已补齐
 
-这不代表业务逻辑已经实现完成。
+这不代表完整资金管理、完整 exit 或 `trade / system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `MALF -> alpha` 正式主线已经成立，下一阶段将进入 `position` 接口切换与最小主线验证
+> `alpha -> position -> portfolio_plan` 最小正式主线已经成立，下一阶段将进入 `trade` 规划与实施
 
 ## 文档入口
 

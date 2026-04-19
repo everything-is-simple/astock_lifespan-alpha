@@ -26,9 +26,12 @@ card -> evidence -> record -> conclusion
 6. `docs/02-spec/02-malf-wave-scale-diagram-edition-placeholder-20260419.md`
 7. `docs/02-spec/03-alpha-pas-trigger-semantic-spec-v1-20260419.md`
 8. `docs/02-spec/04-alpha-signal-aggregation-spec-v1-20260419.md`
-9. `docs/03-execution/README.md`
-10. `docs/03-execution/13-alpha-triggers-and-signal-conclusion-20260419.md`
-11. `docs/03-execution/14-stage-three-closeout-conclusion-20260419.md`
+9. `docs/02-spec/05-alpha-signal-to-position-bridge-spec-v1-20260419.md`
+10. `docs/02-spec/06-position-minimal-ledger-and-runner-spec-v1-20260419.md`
+11. `docs/02-spec/07-portfolio-plan-minimal-bridge-spec-v1-20260419.md`
+12. `docs/03-execution/README.md`
+13. `docs/03-execution/20-position-materialization-and-portfolio-bridge-conclusion-20260419.md`
+14. `docs/03-execution/21-stage-four-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -68,10 +71,11 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段三 `alpha` 五账本与 `alpha_signal`，并进入阶段四准备期。
+当前仓库已经完成阶段四 `position` 接口切换与 `portfolio_plan` 最小桥接。
 
 这意味着：
 
-- 阶段一到阶段三的实际交付范围都已经进入正式治理闭环
-- `alpha` 已具备正式规格、独立账本、共享输入骨架和 `alpha_signal` 正式输出
-- 阶段四 `position` 尚未开始实施，后续仍必须沿用同样的执行纪律
+- 阶段一到阶段四的实际交付范围都已经进入正式治理闭环
+- `position` 已具备正式规格、独立账本、queue/checkpoint、正式 runner 与三层最小输出
+- `portfolio_plan` 已具备最小三表、最小组合裁决与正式 runner
+- 阶段五 `trade` 尚未开始实施，后续仍必须沿用同样的执行纪律
