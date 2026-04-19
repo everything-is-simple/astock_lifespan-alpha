@@ -53,6 +53,8 @@ card -> evidence -> record -> conclusion
 33. `docs/03-execution/41-stage-thirteen-malf-day-segmented-build-completion-engineering-closeout-conclusion-20260419.md`
 34. `docs/02-spec/19-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-spec-v1-20260419.md`
 35. `docs/03-execution/42-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-conclusion-20260419.md`
+36. `docs/02-spec/20-stage-fifteen-malf-day-schema-backfill-compatibility-spec-v1-20260419.md`
+37. `docs/03-execution/43-stage-fifteen-malf-day-schema-backfill-compatibility-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -138,6 +140,10 @@ card -> evidence -> record -> conclusion
 - 阶段十四规格与执行闭环 `42` 已补齐
 - 首轮真实 `100 symbol` frontier proof 失败于 `initialize_malf_schema` 对现有真实库的 schema 补齐
 - 本轮未生成新的 summary / progress sidecar，`500 / 1000 / full-universe / replay` 均未启动
+- 阶段十五规格与执行闭环 `43` 已补齐
+- `repair_malf_day_schema` 已完成真实 target + building artifacts repair/probe
+- 正确 active artifact 上的 `100 / 500 / resume / 1000 symbol` proof 已通过
+- 当前 remaining symbols 为 `426`，下一 frontier 为 `688618.SH`
 - 阶段九 replay 继续保持待重发状态
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`

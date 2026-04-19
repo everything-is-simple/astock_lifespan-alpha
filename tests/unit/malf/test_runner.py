@@ -13,7 +13,8 @@ from astock_lifespan_alpha.malf import run_malf_day_build, run_malf_month_build,
 from astock_lifespan_alpha.malf.source import load_source_bars
 from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.malf.contracts import Timeframe
-from astock_lifespan_alpha.malf.schema import MALF_TABLES
+from astock_lifespan_alpha.malf.repair import repair_malf_day_schema
+from astock_lifespan_alpha.malf.schema import MALF_TABLES, initialize_malf_schema
 from astock_lifespan_alpha.malf.source import DAY_ADJUST_METHOD, SourceContractViolationError
 
 
@@ -39,6 +40,40 @@ def test_malf_runner_initializes_formal_schema(monkeypatch, tmp_path):
         with duckdb.connect(str(target_path), read_only=True) as connection:
             table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
         assert set(MALF_TABLES).issubset(table_names)
+
+
+def test_malf_schema_backfills_legacy_malf_run_progress_columns(tmp_path):
+    target_path = tmp_path / "legacy_malf_day.duckdb"
+    _write_legacy_malf_run(target_path)
+
+    initialize_malf_schema(target_path)
+
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        row_count = connection.execute("SELECT COUNT(*) FROM malf_run WHERE run_id = 'day-legacy'").fetchone()[0]
+        columns = {
+            row[1]: {"type": row[2], "notnull": bool(row[3]), "default": row[4]}
+            for row in connection.execute("PRAGMA table_info('malf_run')").fetchall()
+        }
+        backfilled_values = connection.execute(
+            """
+            SELECT
+                symbols_total,
+                symbols_completed,
+                current_symbol,
+                elapsed_seconds,
+                estimated_remaining_symbols
+            FROM malf_run
+            WHERE run_id = 'day-legacy'
+            """
+        ).fetchone()
+
+    assert row_count == 1
+    assert columns["symbols_total"]["notnull"] is True
+    assert columns["symbols_total"]["default"] == "0"
+    assert columns["symbols_completed"]["notnull"] is True
+    assert columns["elapsed_seconds"]["notnull"] is True
+    assert columns["estimated_remaining_symbols"]["notnull"] is True
+    assert backfilled_values == (0, 0, None, 0.0, 0)
 
 
 def test_malf_day_runner_materializes_semantic_outputs(monkeypatch, tmp_path):
@@ -362,6 +397,53 @@ def test_malf_day_runner_reports_progress_and_abandoned_build_artifacts(monkeypa
     assert progress_payload["ledger_rows_written"]["wave_rows"] >= 1
 
 
+def test_malf_day_runner_backfills_legacy_building_schema(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_day_source_bars(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+            ("AAA", "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+            ("AAA", "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+        ],
+    )
+    building_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.day-legacy.building.duckdb"
+    _write_legacy_malf_run(building_path)
+
+    summary = run_malf_day_build(symbol_limit=1)
+
+    assert summary.artifact_summary.active_build_path == str(building_path)
+    assert summary.progress_summary.symbols_total == 1
+    assert summary.progress_summary.symbols_completed == 1
+    assert summary.progress_summary.progress_path is not None
+
+
+def test_repair_malf_day_schema_repairs_target_and_building_artifacts(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    malf_root = workspace / "data" / "astock_lifespan_alpha" / "malf"
+    target_path = malf_root / "malf_day.duckdb"
+    active_path = malf_root / "malf_day.day-active.building.duckdb"
+    abandoned_path = malf_root / "malf_day.day-abandoned.building.duckdb"
+    for database_path in (target_path, active_path, abandoned_path):
+        _write_legacy_malf_run(database_path)
+    original_mtimes = {database_path: database_path.stat().st_mtime for database_path in (target_path, active_path, abandoned_path)}
+
+    summary = repair_malf_day_schema(settings=default_settings(repo_root=workspace / "repo"))
+    rerun_summary = repair_malf_day_schema(settings=default_settings(repo_root=workspace / "repo"))
+
+    assert summary.runner_name == "repair_malf_day_schema"
+    assert summary.status == "completed"
+    assert summary.scanned_database_count == 3
+    assert summary.repaired_database_count == 3
+    assert all(database.after.compatible for database in summary.databases)
+    assert all("symbols_total" in database.before.missing_columns for database in summary.databases)
+    assert rerun_summary.status == "completed"
+    assert rerun_summary.repaired_database_count == 0
+    assert all(database.actions == () for database in rerun_summary.databases)
+    assert {database_path: database_path.stat().st_mtime for database_path in original_mtimes} == original_mtimes
+
+
 def test_malf_day_runner_fails_fast_on_duplicate_backward_rows(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_stock_adjusted_bars_with_adjust_method(
@@ -407,6 +489,49 @@ def _write_day_source_bars(database_path: Path, rows: list[tuple[str, str, float
         connection.executemany(
             "INSERT INTO market_base_day VALUES (?, ?, ?, ?, ?, ?)",
             [(symbol, datetime.fromisoformat(bar_dt), open_price, high_price, low_price, close_price) for symbol, bar_dt, open_price, high_price, low_price, close_price in rows],
+        )
+
+
+def _write_legacy_malf_run(database_path: Path) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DROP TABLE IF EXISTS malf_run")
+        connection.execute(
+            """
+            CREATE TABLE malf_run (
+                run_id TEXT PRIMARY KEY,
+                timeframe TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_path TEXT,
+                input_rows BIGINT NOT NULL DEFAULT 0,
+                symbols_seen BIGINT NOT NULL DEFAULT 0,
+                symbols_updated BIGINT NOT NULL DEFAULT 0,
+                inserted_pivots BIGINT NOT NULL DEFAULT 0,
+                inserted_waves BIGINT NOT NULL DEFAULT 0,
+                inserted_state_snapshots BIGINT NOT NULL DEFAULT 0,
+                inserted_wave_scale_snapshots BIGINT NOT NULL DEFAULT 0,
+                inserted_wave_scale_profiles BIGINT NOT NULL DEFAULT 0,
+                latest_bar_dt TIMESTAMP,
+                message TEXT,
+                started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                finished_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO malf_run (
+                run_id,
+                timeframe,
+                status,
+                source_path,
+                input_rows,
+                symbols_seen,
+                symbols_updated,
+                message
+            )
+            VALUES ('day-legacy', 'day', 'running', 'legacy-source.duckdb', 0, 0, 0, 'legacy run')
+            """
         )
 
 

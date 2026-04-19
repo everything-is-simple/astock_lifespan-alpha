@@ -212,3 +212,57 @@ def test_stage_thirteen_malf_day_segmented_build_completion_engineering_closeout
 
     for term in required_terms:
         assert term in combined
+
+
+def test_stage_fifteen_malf_day_schema_backfill_compatibility_spec_freezes_boundary():
+    repo_root = Path(__file__).resolve().parents[3]
+    content = (
+        repo_root
+        / "docs"
+        / "02-spec"
+        / "20-stage-fifteen-malf-day-schema-backfill-compatibility-spec-v1-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    required_terms = [
+        "`stage-fifteen-malf-day-schema-backfill-compatibility`",
+        "`initialize_malf_schema()`",
+        "`ADD COLUMN ... NOT NULL DEFAULT`",
+        "`symbols_total`",
+        "`symbols_completed`",
+        "`current_symbol`",
+        "`elapsed_seconds`",
+        "`estimated_remaining_symbols`",
+        "`repair_malf_day_schema`",
+        "`100 / 500 / 1000 symbol`",
+        "不修改 MALF 语义状态机",
+    ]
+
+    for term in required_terms:
+        assert term in content
+
+
+def test_stage_fifteen_malf_day_schema_backfill_compatibility_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    execution_index = (repo_root / "docs" / "03-execution" / "README.md").read_text(encoding="utf-8")
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root
+        / "docs"
+        / "03-execution"
+        / "43-stage-fifteen-malf-day-schema-backfill-compatibility-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{execution_index}\n{docs_index}\n{conclusion}"
+    required_terms = [
+        "`43` 阶段十五 MALF day schema backfill 兼容修复",
+        "`docs/03-execution/43-stage-fifteen-malf-day-schema-backfill-compatibility-conclusion-20260419.md`",
+        "`stage-fifteen-malf-day-schema-backfill-compatibility`",
+        "`repair_malf_day_schema`",
+        "`100 / 500 / 1000 symbol`",
+    ]
+
+    for term in required_terms:
+        assert term in combined

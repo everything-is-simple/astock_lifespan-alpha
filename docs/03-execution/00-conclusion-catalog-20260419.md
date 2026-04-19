@@ -259,3 +259,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/42-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-conclusion-20260419.md`
 - 裁决：`已记录阻塞`
 - 说明：阶段十四 preflight 已确认真实 source、frontier 与 active/abandoned artifacts；但首轮 `python scripts/malf/run_malf_day_build.py --start-symbol 600771.SH --symbol-limit 100` 在 `initialize_malf_schema` 对现有真实库补列时失败于 `Parser Error: Adding columns with constraints not yet supported`，因此 `500 / 1000 / full-universe / replay` 均未启动。
+
+### `43` 阶段十五 MALF day schema backfill 兼容修复
+
+- 结论文档：`docs/03-execution/43-stage-fifteen-malf-day-schema-backfill-compatibility-conclusion-20260419.md`
+- 裁决：`已接受，保留后续 full-universe / replay 门槛`
+- 说明：`stage-fifteen-malf-day-schema-backfill-compatibility` 已完成；旧版真实 `malf_run` 到当前进度合同的 schema backfill 兼容性已修复，`repair_malf_day_schema` 已完成真实 repair/probe，正确 active artifact 上的 `100 / 500 / resume / 1000 symbol` proof 已通过，当前 remaining symbols 为 `426`，full-universe completion 与阶段九 replay 尚未登记完成。

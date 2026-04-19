@@ -9,6 +9,7 @@ from astock_lifespan_alpha.malf.contracts import (
     WriteTimingSummary,
 )
 from astock_lifespan_alpha.malf.runner import run_malf_day_build, run_malf_month_build, run_malf_week_build
+from astock_lifespan_alpha.malf.repair import repair_malf_day_schema
 
 __all__ = [
     "ArtifactSummary",
@@ -20,4 +21,5 @@ __all__ = [
     "run_malf_day_build",
     "run_malf_week_build",
     "run_malf_month_build",
+    "repair_malf_day_schema",
 ]

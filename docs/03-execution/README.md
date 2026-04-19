@@ -83,6 +83,7 @@ card -> evidence -> record -> conclusion
 - `40` 阶段十三 MALF day segmented build completion 规格冻结
 - `41` 阶段十三 MALF day segmented build completion 工程收口
 - `42` 阶段十四 MALF day 真实分段证明与阶段九重发
+- `43` 阶段十五 MALF day schema backfill 兼容修复
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -105,6 +106,7 @@ Stage-five implementation defaults are frozen for engineering:
 - 阶段十完成。
 - 阶段十三 segmented build completion 已冻结并完成首轮工程落地。
 - 阶段十四真实分段证明已启动，但首轮 frontier proof 阻塞于真实库 schema backfill 兼容性。
+- 阶段十五已完成 schema backfill 兼容修复，并恢复通过 `100 / 500 / resume / 1000 symbol` proof。
 - 阶段九 replay 继续保持待重发状态。
 ## 阶段十一补充
 
@@ -153,3 +155,13 @@ Stage-five implementation defaults are frozen for engineering:
 - 首轮命令 `python scripts/malf/run_malf_day_build.py --start-symbol 600771.SH --symbol-limit 100` 失败于 `initialize_malf_schema`
 - 当前精确 blocker 为：DuckDB 不支持在现有真实 `malf_run` 表上用带约束定义直接 `ADD COLUMN`
 - 本轮未生成新的 summary / progress sidecar；`500 / 1000 / full-universe / replay` 均未启动
+
+## 阶段十五补充
+
+- `43` 阶段十五 MALF day schema backfill 兼容修复
+- `stage-fifteen-malf-day-schema-backfill-compatibility` 已冻结真实库 schema repair 口径
+- `initialize_malf_schema()` 已兼容旧版 `malf_run` 的分步 backfill
+- `repair_malf_day_schema` 已完成 target + building artifacts 的显式 repair/probe
+- 正确 active artifact 上的 `100 / 500 / resume / 1000 symbol` proof 已通过
+- 当前 remaining symbols 为 `426`，下一 frontier 为 `688618.SH`
+- 阶段十五不登记 full-universe completion 或阶段九 replay 完成
