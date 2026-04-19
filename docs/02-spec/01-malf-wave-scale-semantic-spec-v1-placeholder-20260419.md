@@ -1,15 +1,33 @@
-# MALF Wave Scale Semantic Spec v1 Placeholder
+# MALF 波段标尺语义规格 v1 占位说明
 
-This placeholder reserves the next formal specification document:
+日期：`2026-04-19`
+状态：`占位`
 
-- MALF formal semantic specification v1
+## 1. 文档目的
 
-It will define:
+本文档预留给 `MALF` 波段标尺的正式文本语义规格。
 
-- `new_count`
-- `no_new_span`
-- `life_state`
-- `update_rank`
-- `stagnation_rank`
-- `wave_position_zone`
+当前仓库已经放入相关 PDF 图稿，但正式中文文本规格尚未完成归档与冻结。
 
+## 2. 当前状态
+
+截至 `2026-04-19`，以下事实成立：
+
+- `MALF` 作为唯一正式市场结构真值层，已经在总方案中被冻结。
+- `new_count / no_new_span / life_state / update_rank / stagnation_rank` 等关键概念已经进入总方案。
+- 但逐条语义定义、边界条件、例外场景与验收样例，还没有形成单独的正式规格文档。
+
+## 3. 后续要求
+
+进入 `MALF` 正式实现前，必须完成本文件的正文替换，至少补齐：
+
+1. 波段、生命、guard、reborn 的逐条定义
+2. `HH / HL / LH / LL` 与失效条件
+3. `new_count` 与 `no_new_span` 的计算规则
+4. `break` 与 `confirmation` 的边界
+5. 日 / 周 / 月三周期独立性约束
+6. 典型样例与最小验收清单
+
+## 4. 与图稿关系
+
+当图稿版与文本版出现冲突时，以正式中文文本规格为准；图稿需要回修，而不是让代码去猜。

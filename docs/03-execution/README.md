@@ -1,0 +1,44 @@
+# 执行区说明
+
+`docs/03-execution/` 不是普通笔记目录，而是正式执行闭环目录。
+
+本目录默认闭环为：
+
+```text
+card -> evidence -> record -> conclusion
+```
+
+## 阅读顺序
+
+建议先读：
+
+1. `00-card-execution-discipline-20260419.md`
+2. `00-conclusion-catalog-20260419.md`
+3. 当前批次对应的 `card`
+4. 对应 `evidence`
+5. 对应 `record`
+6. 对应 `conclusion`
+
+## 目录规则
+
+根目录只放：
+
+- `card`
+- `conclusion`
+- 模板
+- 执行纪律
+- 结论目录
+- `README`
+
+子目录规则：
+
+- 证据放在 `docs/03-execution/evidence/`
+- 记录放在 `docs/03-execution/records/`
+
+如果把 `record` 或 `evidence` 直接放到根目录，属于治理违规，需要先回收整理再继续。
+
+## 当前批次
+
+当前已补齐批次：
+
+- `01` 阶段一基础重构

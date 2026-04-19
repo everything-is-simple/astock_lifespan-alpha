@@ -1,29 +1,32 @@
-# astock_lifespan-alpha Reconstruction Master Plan v1
+# astock-lifespan-alpha 重构总方案 v1
 
-## 0. Document Position
+日期：`2026-04-19`
+状态：`冻结`
 
-This document is the master reconstruction plan for `astock_lifespan-alpha`.
+## 0. 文档定位
 
-It serves as the top-level implementation and governance baseline for the new system.
+本文档是 `astock_lifespan-alpha` 的正式重构总方案。
 
-This document answers four questions:
+它回答四个问题：
 
-1. What the new system is
-2. Which parts of `lifespan-0.01` are inherited and which are discarded
-3. Which databases may be reused and which must be rebuilt
-4. Which technical stack and phased delivery order the new system must follow
+1. 新系统到底是什么。
+2. `lifespan-0.01` 里哪些东西继承，哪些东西废止。
+3. 哪些数据库可以复用，哪些必须重建。
+4. 技术栈、模块主链路与阶段交付顺序是什么。
 
+## 1. 新系统定义
 
-## 1. System Definition
-
-The new system is defined as:
+新系统定义为：
 
 > `lifespan-0.01 - structure - filter`
 
+这句话的正式含义是：
 
-This means the new system preserves the formal core skeleton of `lifespan-0.01`, while completely removing `structure` and `filter` from the mainline.
+- 继承 `lifespan-0.01` 的主线分层思想与下游模块序列。
+- 明确移除 `structure` 与 `filter` 作为正式真值层。
+- 从 `MALF` 开始重建新的语义账本宇宙。
 
-The formal module set is fixed as:
+正式模块集合固定为：
 
 - `core`
 - `data`
@@ -34,106 +37,87 @@ The formal module set is fixed as:
 - `trade`
 - `system`
 
-
-The formal mainline is fixed as:
+正式主链路固定为：
 
 ```text
 data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 ```
 
+## 2. 系统真值边界
 
-## 2. System Boundary
+新系统的真值边界冻结如下：
 
-The new system keeps the original layered mindset of `lifespan-0.01`, but resets the truth boundary.
+- `data`：客观事实层
+- `malf`：唯一正式市场结构真值层
+- `alpha`：PAS 五触发器信号层
+- `position`：持仓物化层
+- `portfolio_plan`：组合决策桥接层
+- `trade`：执行运行层
+- `system`：最终读出与编排层
 
-The new truth boundary is:
+明确废止：
 
-- `data` is the objective fact layer
-- `malf` is the only market structure truth layer
-- `alpha` is the PAS five-trigger signal layer
-- `position` is the position materialization layer
-- `portfolio_plan` is the portfolio decision bridge layer
-- `trade` is the execution runtime layer
-- `system` is the final readout and orchestration layer
+- `structure` 不再是正式上游。
+- `filter` 不再是正式上游。
 
+它们不是“暂时停用”，而是被移出新系统正式架构。
 
-`structure` and `filter` are no longer formal truth layers in the new system.
+## 3. 五根目录工作区规格
 
-They are not "temporarily disabled".
+正式工作区固定为：
 
-They are removed from the formal system architecture.
+- 仓库根：`H:\astock_lifespan-alpha`
+- 数据根：`H:\Lifespan-data`
+- 报告根：`H:\Lifespan-report`
+- 临时根：`H:\Lifespan-temp`
+- 验证根：`H:\Lifespan-Validated`
 
+职责冻结为：
 
-## 3. Five-Root Workspace Contract
+- 仓库根：代码、测试、文档、治理资产、脚本
+- 数据根：正式数据库与长期数据资产
+- 报告根：人类可读报告与导出物
+- 临时根：回放缓存、pytest 临时目录、临时中间产物
+- 验证根：已接受的快照、验证产物与证据副本
 
-The new system continues to use the existing five-root layout.
+## 4. 数据库重构决策
 
-The formal roots are:
+正式数据库策略冻结为：
 
-- repo root: `H:\astock_lifespan-alpha`
-- data root: `H:\Lifespan-data`
-- report root: `H:\Lifespan-report`
-- temp root: `H:\Lifespan-temp`
-- validated root: `H:\Lifespan-Validated`
+> 旧 `raw/base` 可以选择性复用；从 `MALF` 往下的正式账本一律按新系统语义重建
 
+### 4.1 可复用层
 
-Their roles remain distinct:
-
-- repo root stores code, docs, tests, governance, and formal scripts
-- data root stores formal databases and long-lived data assets
-- report root stores human-readable reports and exported outputs
-- temp root stores replay scratch work, pytest temp data, caches, and temporary artifacts
-- validated root stores accepted validation snapshots and evidence assets
-
-
-## 4. Database Reconstruction Decision
-
-The database strategy is formally frozen as:
-
-> old `raw/base` may be selectively reused; from `MALF` onward, all formal ledgers must be rebuilt as new-system ledgers
-
-
-### 4.1 Reusable Fact Layer
-
-The following old-system layers may be selectively reused as objective source ledgers:
+仅允许把客观事实层当作输入来源：
 
 - `raw_market`
 - `market_base`
-- any other source layer that is objectively factual and not dependent on old MALF semantics
+- 其他与旧 `MALF` 语义无关、且本质上属于客观事实的源账本
 
+### 4.2 不可复用层
 
-These are source-of-fact inputs, not downstream semantic truth.
+以下旧账本不能作为新系统正式真值继承：
 
+- 旧 `malf`
+- 旧 `alpha`
+- 旧 `position`
+- 旧 `portfolio_plan`
+- 旧 `trade`
+- 旧 `system`
 
-### 4.2 Non-Reusable Semantic Layer
+原因冻结为：
 
-The following old-system databases must not be treated as formal truth ledgers for the new system:
+> 旧 `MALF` 语义被判定不再可信，因此所有建立在其上的下游语义账本一并失去正式继承资格
 
-- old `malf`
-- old `alpha`
-- old `position`
-- old `portfolio_plan`
-- old `trade`
-- old `system`
+### 4.3 新系统账本命名空间
 
-
-The key reason is:
-
-> old `malf` is judged to be semantically wrong, therefore all ledgers built on top of it lose formal inheritance eligibility
-
-
-### 4.3 New-System Ledger Universe
-
-The new system must create its own independent ledger universe from MALF onward.
-
-Recommended path namespace:
+新系统正式账本统一落在：
 
 ```text
 H:\Lifespan-data\astock_lifespan_alpha\
 ```
 
-
-Recommended formal database family:
+首版数据库家族冻结为：
 
 - `malf\malf_day.duckdb`
 - `malf\malf_week.duckdb`
@@ -149,197 +133,151 @@ Recommended formal database family:
 - `trade\trade.duckdb`
 - `system\system.duckdb`
 
+## 5. 技术栈决策
 
-## 5. Technical Stack Decision
-
-The first-edition implementation stack is formally frozen as:
+首版实现技术栈冻结为：
 
 > `Python + DuckDB + Arrow`
 
+职责拆分固定为：
 
-Its responsibility split is fixed as:
+- `DuckDB`：正式账本存储与查询
+- `Arrow`：批量表格交换格式
+- `Python`：编排、runner、回放、断点、工作队列与领域执行
 
-- `DuckDB` manages formal ledgers
-- `Arrow` manages batch exchange
-- `Python` manages orchestration, runner flow, replay, checkpoint, and domain execution
+### 5.1 DuckDB 责任
 
+- 正式数据库存储
+- SQL 查询、过滤、关联与聚合
+- 历史区间加载
+- profile / percentile 持久化
+- checkpoint 与队列表物化
 
-### 5.1 DuckDB Responsibility
+### 5.2 Arrow 责任
 
-DuckDB is the formal ledger and query engine.
+- 模块间批量交换
+- `MALF` 中间结果交换
+- `alpha` 输入输出交换
+- 模块间表格移交
 
-It is responsible for:
+### 5.3 Python 责任
 
-- formal database storage
-- SQL filtering and joins
-- aggregation
-- replay range loading
-- profile and percentile persistence
-- checkpoint and queue-side ledger materialization
+- runner 组织
+- 回放流程
+- checkpoint 处理
+- 工作队列管理
+- 领域状态迁移
+- 正式构建顺序控制
 
+### 5.4 pandas 使用限制
 
-### 5.2 Arrow Responsibility
+`pandas` 只能作为局部辅助工具，不得成为正式数据模型。
 
-Arrow is the standard batch exchange format between modules and execution stages.
+因此：
 
-It is responsible for:
+- 账本契约不能依赖 DataFrame 形状
+- 领域语义不能靠 pandas 约定来定义
+- 核心 `MALF` 语义不能写成 pandas-first
 
-- bar batch transport
-- MALF intermediate batch exchange
-- alpha trigger input and output batch exchange
-- module-to-module tabular handoff
+### 5.5 未来迁移约束
 
+首版实现必须为未来迁移到 `Go + DuckDB` 预留空间，因此：
 
-### 5.3 Python Responsibility
+- 领域语义要与语言无关
+- Schema 契约要与语言无关
+- runner 契约要与语言无关
+- 优先 Arrow-first，而不是 pandas-first 的偷懒实现
 
-Python is the orchestration and execution language for the first edition.
+## 6. MALF 正式重构规格
 
-It is responsible for:
+`malf` 是新系统唯一正式市场结构真值层。
 
-- runner organization
-- replay flow
-- checkpoint handling
-- work queue handling
-- domain state transitions
-- formal build sequencing
+它只处理价格结构事实，不处理：
 
+- 交易动作
+- 概率预测
+- 持仓建议
+- 跨周期决策逻辑
 
-### 5.4 pandas Restriction
+### 6.1 三周期独立账本
 
-`pandas` may be used only as a local auxiliary tool.
-
-It must not become the formal system data model.
-
-This means:
-
-- ledger contracts must not depend on pandas-specific structures
-- domain semantics must not be defined by DataFrame shape
-- core MALF logic must not be pandas-first
-
-
-### 5.5 Future Migration Constraint
-
-The first edition must be written under a future migration target of:
-
-> `Go + DuckDB`
-
-
-Therefore:
-
-- domain semantics must remain language-independent
-- schema contracts must remain language-independent
-- runner contracts must remain language-independent
-- Arrow-first exchange must be preferred over pandas-first implementation shortcuts
-
-
-## 6. MALF Formal Reconstruction
-
-`malf` becomes the only formal market structure truth layer.
-
-It no longer delegates truth authority to `structure` or `filter`.
-
-`malf` only handles price-structure facts.
-
-It does not handle:
-
-- trading action
-- probability forecast
-- position advice
-- cross-timeframe decision logic
-
-
-### 6.1 Three Independent Timeframe Ledgers
-
-MALF is split into three fully independent formal ledgers:
+`MALF` 固定拆为三个相互独立的正式账本：
 
 - `malf_day`
 - `malf_week`
 - `malf_month`
 
-
-Each timeframe must have independent:
+每个周期都必须独立拥有：
 
 - runner
-- work queue
+- work_queue
 - checkpoint
 - rebuild flow
 - life statistics
 - sample genealogy
 
+任何一个周期都不允许拿另一个周期来定义自己的 life 尺度。
 
-No timeframe is allowed to define its life ruler using another timeframe.
+### 6.2 最小生命表达
 
-
-### 6.2 MALF Minimal Life Expression
-
-The formal minimal life expression is:
+正式最小生命表达冻结为：
 
 ```text
 Life = (direction, new_count, no_new_span, life_state)
 ```
 
+其中：
 
-Where:
+- `direction`：当前波方向
+- `new_count`：严格新高/新低替换次数
+- `no_new_span`：自最新一次新高/新低之后连续未创新的 bar 数
+- `life_state`：正式生命边界状态
 
-- `direction` is current wave direction
-- `new_count` is the strict new-value replacement count
-- `no_new_span` is the count of consecutive bars without new continuation since the latest `new_count`
-- `life_state` is the formal life boundary state
+### 6.3 统一波段位置表达
 
-
-### 6.3 MALF Unified Wave Position
-
-The unified formal wave ruler coordinate is:
+正式波段位置坐标冻结为：
 
 ```text
 WavePosition = (direction, update_rank, stagnation_rank, life_state)
 ```
 
+它是描述性坐标，不携带交易动作含义。
 
-This position is descriptive, not action-bearing.
+### 6.4 核心语义规则
 
+正式规则冻结为：
 
-### 6.4 MALF Core Semantic Rules
-
-Formal rules are frozen as:
-
-- `new_count` records only strict new-value replacement
-- upward waves count only new `HH`
-- downward waves count only new `LL`
-- `HL/LH` do not count as `new_count`
-- approximate, equal, or failed-break values do not count
-- `no_new_span` resets to zero when a new `HH/LL` occurs
-- `no_new_span` increases only while the current wave remains unbroken
-- `life_state` is fixed to `alive / broken / reborn`
+- `new_count` 只记录严格新值替换
+- 上升波只统计新 `HH`
+- 下降波只统计新 `LL`
+- `HL/LH` 不计入 `new_count`
+- 近似、相等、失败突破都不计入
+- 出现新 `HH/LL` 时 `no_new_span` 归零
+- 只有旧波尚未被破坏时，`no_new_span` 才继续增长
+- `life_state` 固定为 `alive / broken / reborn`
 - `break != confirmation`
 
+### 6.5 reborn 规则
 
-### 6.5 Reborn Decision
+`reborn` 被正式保留，其含义冻结为：
 
-`reborn` is formally preserved.
+> 旧波已经被破坏，但新方向第一次有效 `new_count` 尚未确认前，处于一种正式中间生命态，称为 `reborn`
 
-Its meaning is frozen as:
+### 6.6 guard 规则
 
-> after the old wave has been broken, but before the first valid opposite-direction `new_count` confirms the new wave, the new life exists in a formal intermediate state called `reborn`
+guard 规则冻结为：
 
+> 使用当前波内最近一个仍然有效的同波结构锚点作为 guard anchor
 
-### 6.6 Guard Rule
+具体为：
 
-The formal guard rule is frozen as:
+- 上升波 guard = 最近有效 `HL`
+- 下降波 guard = 最近有效 `LH`
+- 当该锚点被破坏时，旧波终止
 
-> use the latest valid same-wave structural anchor as the guard anchor
+### 6.7 MALF 最小输出表
 
-
-This means:
-
-- upward wave guard = latest valid `HL`
-- downward wave guard = latest valid `LH`
-- once this anchor is broken, the old wave is terminated
-
-
-### 6.7 MALF Formal Output Tables
-
-Each MALF timeframe database must at minimum contain:
+每个 `MALF` 周期数据库至少包含：
 
 - `malf_run`
 - `malf_work_queue`
@@ -350,12 +288,11 @@ Each MALF timeframe database must at minimum contain:
 - `malf_wave_scale_snapshot`
 - `malf_wave_scale_profile`
 
+### 6.8 alpha 面向快照
 
-### 6.8 MALF Wave Scale Snapshot
+`malf_wave_scale_snapshot` 是面向 `alpha` 的正式读模型。
 
-`malf_wave_scale_snapshot` is the formal alpha-facing read model.
-
-Its minimum field set is frozen as:
+最小字段集冻结为：
 
 - `symbol`
 - `timeframe`
@@ -369,34 +306,29 @@ Its minimum field set is frozen as:
 - `stagnation_rank`
 - `wave_position_zone`
 
+### 6.9 波段区间分区
 
-### 6.9 MALF Wave Position Zone
-
-`wave_position_zone` is fixed to four areas:
+`wave_position_zone` 固定为四个区域：
 
 - `early_progress`
 - `mature_progress`
 - `mature_stagnation`
 - `weak_stagnation`
 
+### 6.10 rank 计算样本约束
 
-### 6.10 MALF Rank Construction
+`update_rank` 与 `stagnation_rank` 采用经验百分位构造。
 
-`update_rank` and `stagnation_rank` are implemented as empirical percentile positions.
+样本约束冻结为：
 
-The sample contract is frozen as:
+- 同一标的
+- 同一周期
+- 同一方向
+- 以完整历史波作为样本单位
 
-- same symbol
-- same timeframe
-- same direction
-- complete historical wave as the sample unit
+## 7. Alpha 正式重构规格
 
-
-## 7. Alpha Formal Reconstruction
-
-`alpha` is reconstructed as a daily PAS five-trigger system.
-
-The five triggers are:
+`alpha` 重构为日线 PAS 五触发器体系：
 
 - `bof`
 - `tst`
@@ -404,10 +336,9 @@ The five triggers are:
 - `cpb`
 - `bpb`
 
+### 7.1 五账本独立
 
-### 7.1 Five Independent Trigger Ledgers
-
-Each trigger must independently run, build, and maintain its own formal ledger:
+每个 trigger 都必须拥有独立正式账本：
 
 - `alpha_bof`
 - `alpha_tst`
@@ -415,8 +346,7 @@ Each trigger must independently run, build, and maintain its own formal ledger:
 - `alpha_cpb`
 - `alpha_bpb`
 
-
-Each trigger ledger must independently own:
+并独立拥有：
 
 - `run`
 - `work_queue`
@@ -424,32 +354,27 @@ Each trigger ledger must independently own:
 - `trigger_event`
 - `trigger_profile`
 
+### 7.2 Alpha 输入边界
 
-### 7.2 Alpha Input Boundary
-
-The PAS five-trigger system reads only:
+阶段一后的正式输入边界固定为：
 
 - `market_base_day`
 - `malf_day.malf_wave_scale_snapshot`
 
+阶段一不恢复旧 `structure/filter/family/formal_signal` 作为上游权威。
 
-The new system does not restore old `structure/filter/family/formal_signal` as upstream authority in phase one.
+### 7.3 Alpha 汇总账本
 
-
-### 7.3 Alpha Signal Summary Ledger
-
-A new formal summary ledger must be created:
+必须新增正式汇总账本：
 
 - `alpha_signal`
 
+它的职责是：
 
-Its role is:
+- 统一五类 trigger 输出
+- 成为 `position` 的唯一正式上游输入
 
-- standardize five-trigger output
-- become the only formal upstream input for `position`
-
-
-Its minimum field set is frozen as:
+最小字段集冻结为：
 
 - `signal_nk`
 - `symbol`
@@ -467,194 +392,150 @@ Its minimum field set is frozen as:
 - `stagnation_rank`
 - `wave_position_zone`
 
-
-## 8. Position, Portfolio Plan, Trade, System
+## 8. Position / Portfolio Plan / Trade / System
 
 ### 8.1 Position
 
-`position` inherits implementation discipline from `lifespan-0.01`, but changes its upstream contract.
+`position` 继承旧系统的实施纪律，但更换正式上游。
 
-`position` must read only:
+它只能读取：
 
 - `alpha_signal`
 
-
-It must not directly read the five trigger ledgers as formal production input.
-
+不得直接把五个 trigger 账本当作生产输入。
 
 ### 8.2 Portfolio Plan
 
-`portfolio_plan` remains a formal independent layer.
+`portfolio_plan` 保留为正式独立层，不删除、不并入其他层。
 
-It is not deleted and not merged into other layers.
+### 8.3 Trade 与 System
 
-It remains between `position` and `trade`.
+在前期阶段里：
 
+- `trade` 暂时保留稳定接口
+- `system` 暂时保留稳定接口
 
-### 8.3 Trade and System
+在上游真值链条稳定之前，不要求深度重构。
 
-In phase one:
+## 9. 分阶段交付
 
-- `trade` keeps stable upstream interfaces
-- `system` keeps stable upstream interfaces
+### 阶段一：仓库与基础底盘引导
 
+任务：
 
-They do not need full deep reconstruction before the upstream truth chain is stabilized.
+- 初始化新仓库
+- 绑定 git remote
+- 建立新的 `pyproject.toml`
+- 建立新的 `.venv`
+- 收缩 `.codex` 治理骨架
+- 冻结五根目录解析
+- 建立新数据命名空间
 
+验收：
 
-## 9. Phase Delivery Plan
+- 仓库可独立运行
+- 环境已隔离
+- 五根目录解析正确
+- 旧 `raw/base` 可作为源输入读取
 
-### Phase 1: Repository and Foundation Bootstrap
+### 阶段二：MALF 冻结与构建
 
-Tasks:
+任务：
 
-- initialize the new repository
-- bind git remote
-- create the new `pyproject.toml`
-- create the new `.venv`
-- transplant and reduce the governance skeleton from `.codex`
-- freeze five-root path parsing
-- establish the new data-root namespace for rebuilt ledgers
+- 冻结 `MALF` 文本规格
+- 冻结 `MALF` 图版规格
+- 实现日/周/月账本与 schema
+- 实现 runner、queue、checkpoint 与 rebuild flow
+- 实现 `malf_wave_scale_snapshot` 与 `malf_wave_scale_profile`
+- 实现 `MALF` 语义测试
 
+验收：
 
-Acceptance:
+- 三周期账本彼此独立运行
+- `reborn` 与 guard 规则正确执行
+- 波段位置坐标被稳定物化
 
-- repository can run independently
-- environment is isolated
-- five-root paths resolve correctly
-- old raw/base can be read as source inputs
+### 阶段三：Alpha 五账本构建
 
+任务：
 
-### Phase 2: MALF Freeze and Build
+- 实现五类 PAS trigger 账本
+- 实现独立 runner、queue、checkpoint
+- 把 alpha 输入绑定到 `market_base_day + malf_day`
+- 实现 `alpha_signal`
 
-Tasks:
+验收：
 
-- freeze MALF textual specification
-- freeze MALF diagram edition
-- implement MALF day/week/month bootstrap and schema
-- implement MALF runner, queue, checkpoint, and rebuild flow
-- implement `malf_wave_scale_snapshot` and `malf_wave_scale_profile`
-- implement MALF semantic tests
+- 任一 trigger 可独立运行
+- 五类 trigger 能稳定汇总进 `alpha_signal`
+- 输出足够稳定，可供 `position` 消费
 
+### 阶段四：Position 接口切换
 
-Acceptance:
+任务：
 
-- day/week/month ledgers run independently
-- `reborn` and guard rules are correctly enforced
-- wave ruler coordinates are materialized
+- 把 `position` 正式改绑到 `alpha_signal`
+- 保留 `portfolio_plan` 中间桥层
+- 验证最小主线连续性
 
+验收：
 
-### Phase 3: Alpha Five-Ledger Build
+- `position` 只依赖 `alpha_signal`
+- `portfolio_plan` 桥层保留
+- 新主线真值链稳定
 
-Tasks:
+## 10. 测试与验收
 
-- implement the five PAS trigger ledgers
-- implement independent runner, queue, checkpoint logic
-- bind alpha input to `market_base_day + malf_day`
-- implement `alpha_signal`
+### 10.1 基础测试
 
+- 新仓库使用独立环境
+- 五根目录可正确解析
+- 旧 `raw/base` 可被读取为源输入
 
-Acceptance:
+### 10.2 MALF 语义测试
 
-- any trigger can run independently
-- all five triggers can be summarized into `alpha_signal`
-- standardized output is stable enough for `position`
+- 只有新 `HH` 才增加上升波 `new_count`
+- 只有新 `LL` 才增加下降波 `new_count`
+- `no_new_span` 只在“未继续、未破坏”时增长
+- `break` 不直接等于新方向确认
+- `reborn` 出现在旧波破坏后、新方向确认前
+- 最近有效 `HL/LH` 被用作 guard anchor
 
+### 10.3 MALF 独立性测试
 
-### Phase 4: Position Interface Cutover
+- `malf_day / malf_week / malf_month` 可独立构建
+- 一个周期的回放或重建不得污染另两个周期
 
-Tasks:
+### 10.4 Alpha 测试
 
-- rebind `position` to `alpha_signal`
-- preserve `portfolio_plan` as the middle bridge
-- validate minimal mainline continuity
+- 任一 PAS trigger 账本可独立运行
+- 每个 trigger 支持 checkpoint 与 replay
+- `alpha_signal` 可稳定汇总五类输出
 
+### 10.5 Position 接口测试
 
-Acceptance:
+- `position` 仅依赖 `alpha_signal` 即可生成最小候选集
 
-- `position` can consume only `alpha_signal`
-- `portfolio_plan` bridge remains intact
-- new upstream truth chain is stable
+## 11. 文档输出要求
 
+本仓库正式文档家族固定为：
 
-## 10. Testing and Acceptance
+- `docs/01-design/`：设计理由
+- `docs/02-spec/`：正式规格
+- `docs/03-execution/`：执行闭环
 
-### 10.1 Foundation Tests
+从本方案开始，正式文档统一使用中文。
 
-- new repository creates and uses its own environment
-- five-root layout resolves correctly
-- old raw/base databases can be read from the new system
+## 12. 冻结结论
 
+本文档冻结以下重构结论：
 
-### 10.2 MALF Semantic Tests
-
-- only new `HH` increments upward `new_count`
-- only new `LL` increments downward `new_count`
-- `no_new_span` increments only while continuation is absent and life is unbroken
-- `break` does not directly confirm a new direction
-- `reborn` exists after old-wave break and before new-wave confirmation
-- latest valid `HL/LH` is used as the formal guard anchor
-
-
-### 10.3 MALF Independence Tests
-
-- `malf_day`, `malf_week`, and `malf_month` can be built independently
-- replay or rebuild on one timeframe does not contaminate the other two
-
-
-### 10.4 Alpha Tests
-
-- any PAS trigger ledger can run independently
-- each trigger supports checkpoint and replay
-- `alpha_signal` consistently summarizes five-trigger output
-
-
-### 10.5 Position Interface Tests
-
-- `position` can create minimal candidates using only `alpha_signal`
-
-
-### 10.6 Phase-One Acceptance
-
-Phase one is accepted only when:
-
-- the system no longer depends on `structure/filter`
-- MALF textual spec and diagram spec are semantically aligned
-- the chain `data -> malf -> alpha_signal -> position -> portfolio_plan` is formally stable
-
-
-## 11. Document Outputs
-
-The following document family must be created as the new baseline:
-
-- `docs/01-design/` for design rationale
-- `docs/02-spec/` for formal specifications
-- `docs/03-execution/` for execution cards
-
-
-This master plan belongs in:
-
-- `docs/02-spec/`
-
-
-The MALF formal text and MALF diagram edition must be written next as direct child specifications of this plan.
-
-
-## 12. Final Freeze
-
-The formal reconstruction decisions frozen by this document are:
-
-1. the new system is `lifespan-0.01 - structure - filter`
-2. the formal mainline is `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system`
-3. old `raw/base` may be selectively reused
-4. old `malf` and all its downstream semantic ledgers must not be reused as new-system truth
-5. the first-edition stack is `Python + DuckDB + Arrow`
-6. DuckDB manages ledgers
-7. Arrow manages batch exchange
-8. MALF is the only formal market structure truth layer
-9. MALF preserves `reborn`
-10. alpha is rebuilt as five independent PAS trigger ledgers plus one `alpha_signal` summary ledger
-11. `position` reads only `alpha_signal`
-
-
-This document is the formal master baseline for the new reconstruction.
+1. 新系统定义为 `lifespan-0.01 - structure - filter`。
+2. 正式主链路为 `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system`。
+3. 旧 `raw/base` 可选择性复用。
+4. 旧 `MALF` 及其全部下游语义账本不得作为新系统真值继承。
+5. 首版技术栈为 `Python + DuckDB + Arrow`。
+6. `MALF` 是唯一正式市场结构真值层。
+7. `MALF` 保留 `reborn`。
+8. `alpha` 重构为五个 PAS 触发器账本加一个 `alpha_signal` 汇总账本。
+9. `position` 只读取 `alpha_signal`。

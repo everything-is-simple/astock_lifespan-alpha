@@ -1,12 +1,37 @@
-# MALF Wave Scale Diagram Edition Placeholder
+# MALF 波段标尺图版规格占位说明
 
-This placeholder reserves the next formal diagram document:
+日期：`2026-04-19`
+状态：`占位`
 
-- MALF diagram edition
+## 1. 文档目的
 
-The future document must align with:
+本文档预留给 `MALF` 波段标尺图版规格。
 
-- the MALF semantic specification
-- the three-timeframe independent-ledger model
-- the wave ruler coordinate system
+它的职责不是替代文本规格，而是把文本规格映射成可审阅、可对照的图示版本。
 
+## 2. 当前输入
+
+仓库根目录已存在多份图稿 PDF，可作为后续整理输入：
+
+- `MALF_第四战场_波段标尺正式语义规格_v1_图版.pdf`
+- `MALF_波段标尺正式语义规格_v1_图版_6页稿.pdf`
+- `MALF_波段标尺正式语义规格_v1_图版_18页稿.pdf`
+
+## 3. 冻结规则
+
+后续图版规格至少要回答：
+
+1. 波段生命周期如何可视化
+2. `new_count / no_new_span / life_state` 如何对应到图形表达
+3. `reborn` 与 `break != confirmation` 如何在图中区分
+4. `update_rank / stagnation_rank / wave_position_zone` 如何形成读图口径
+
+## 4. 权威顺序
+
+权威顺序固定为：
+
+1. 正式中文文本规格
+2. 图版规格
+3. 代码实现
+
+图版是帮助理解与对齐，不是替代正式文字契约。
