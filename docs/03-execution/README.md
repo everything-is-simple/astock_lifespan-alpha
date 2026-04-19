@@ -65,3 +65,9 @@ card -> evidence -> record -> conclusion
 - `22` trade 最小执行账本与 runner 规格冻结
 - `23` portfolio_plan -> trade 桥接规格冻结
 - `24` 阶段五文档总收口
+
+Stage-five implementation defaults are frozen for engineering:
+- `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
+- The replay work unit is `portfolio_id + symbol`.
+- Valid `open` rows use 次日开盘执行 and materialize `filled`.
+- `accepted` remains a reserved status and is not materialized by the first runner.

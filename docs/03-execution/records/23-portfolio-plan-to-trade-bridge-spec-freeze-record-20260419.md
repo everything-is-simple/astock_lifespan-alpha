@@ -14,3 +14,4 @@
 ## 3. 备注
 
 - 本批次明确把阶段五执行价格语义与阶段四桥接参考字段切开。
+Implementation freeze record: added bridge defaults for `PathConfig.source_databases.market_base`, 次日开盘执行, `filled / rejected`, and no `accepted` materialization in the first runner.

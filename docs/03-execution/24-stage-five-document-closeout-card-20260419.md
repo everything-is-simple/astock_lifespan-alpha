@@ -44,3 +44,4 @@
 1. 阶段五被明确标记为“文档已冻结，工程待启动”。
 2. `22-24` 在索引与结论目录中可追溯。
 3. 顶层状态一致表达价格分线与阶段四勘误已冻结。
+Implementation freeze addendum: stage-five document closeout now freezes `PathConfig.source_databases.market_base`, 次日开盘执行, `accepted` as reserved but not materialized, and `portfolio_id + symbol` as the replay work unit before trade engineering.

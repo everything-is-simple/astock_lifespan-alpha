@@ -239,3 +239,17 @@ load portfolio_plan_snapshot + execution_price_line
 1. 阶段五 `trade` 只做最小执行账本，不做持仓延续与退出引擎。
 2. `trade` 的正式价格口径属于 `execution_price_line`，与 `malf / alpha` 的 `analysis_price_line` 分线。
 3. `run_trade_from_portfolio_plan` 是阶段五唯一正式 Python 入口。
+
+## 11. Implementation Freeze Addendum
+
+This addendum freezes the stage-five engineering defaults before code implementation.
+
+1. `execution_price_line` is physically backed by `PathConfig.source_databases.market_base` in stage five.
+2. The physical reuse of `market_base` does not merge semantics with `analysis_price_line`.
+3. `planned_trade_date` and `execution_trade_date` are the first available trading day after `reference_trade_date` for the same `symbol`.
+4. `execution_price` is the `open` price from that planned execution day.
+5. Missing next trading day or missing `open` price must produce `trade_order_execution.execution_status='rejected'`.
+6. `accepted` is a reserved execution status in stage five; the first implementation only materializes `filled / rejected`.
+7. The bounded replay work unit is fixed as `portfolio_id + symbol`.
+8. `order_intent_nk` is based on `portfolio_id / candidate_nk / planned_trade_date / trade_contract_version`.
+9. 次日开盘执行 is the frozen stage-five execution-price convention.

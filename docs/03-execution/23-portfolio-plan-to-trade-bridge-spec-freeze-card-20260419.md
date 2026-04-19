@@ -43,3 +43,4 @@
 1. `trade` 的唯一正式上游被固定为 `portfolio_plan_snapshot`。
 2. `blocked / admitted / trimmed` 的桥接行为被明确冻结。
 3. 阶段四参考价格口径与阶段五正式执行价格口径被明确切开。
+Implementation freeze addendum: stage-five bridge engineering uses `PathConfig.source_databases.market_base` as `execution_price_line`, maps valid `open` rows to 次日开盘执行, materializes `filled / rejected`, reserves `accepted`, and keeps selective rebuild bounded by `portfolio_id + symbol`.

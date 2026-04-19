@@ -151,3 +151,17 @@ runner 必须支持：
 1. `trade` 的唯一正式上游是 `portfolio_plan_snapshot`。
 2. 阶段五只做最小桥接，不扩展到 `carry / exit / system`。
 3. 阶段四 `reference_trade_date / reference_price` 只是最小桥接参考，不等于正式执行价格口径。
+
+## 10. Implementation Freeze Addendum
+
+This addendum freezes the bridge implementation defaults before code implementation.
+
+1. `trade` consumes `portfolio_plan_snapshot` plus the `execution_price_line` adapter only.
+2. The stage-five `execution_price_line` adapter reads `PathConfig.source_databases.market_base`.
+3. `planned_trade_date` is the first available `market_base_day` date after `reference_trade_date` for the same `symbol`.
+4. `execution_trade_date` equals `planned_trade_date`.
+5. `execution_price` is the `open` price on `execution_trade_date`.
+6. `accepted` is reserved but not materialized by the first stage-five runner.
+7. Valid `open` intents materialize `filled`; blocked or invalid inputs materialize `rejected`.
+8. Selective rebuild remains bounded by `portfolio_id + symbol`.
+9. 次日开盘执行 is the frozen bridge convention from `portfolio_plan` into `trade`.

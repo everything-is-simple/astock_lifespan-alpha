@@ -19,3 +19,4 @@
 
 - `docs/02-spec/09-portfolio-plan-to-trade-bridge-spec-v1-20260419.md`
 - `docs/03-execution/23-portfolio-plan-to-trade-bridge-spec-freeze-conclusion-20260419.md`
+Implementation freeze evidence: the bridge spec now records that `portfolio_plan_snapshot` is converted through an `execution_price_line` adapter backed by `PathConfig.source_databases.market_base`, with valid rows materialized as `filled`.

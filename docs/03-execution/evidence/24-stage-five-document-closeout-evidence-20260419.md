@@ -23,3 +23,4 @@
 - `docs/03-execution/README.md`
 - `docs/03-execution/00-conclusion-catalog-20260419.md`
 - `tests/unit/docs/test_trade_specs.py`
+Implementation freeze evidence: the stage-five closeout references the frozen engineering defaults for execution price backing, 次日开盘执行, `filled / rejected`, reserved `accepted`, and `portfolio_id + symbol`.

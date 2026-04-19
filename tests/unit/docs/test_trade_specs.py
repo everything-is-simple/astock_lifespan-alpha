@@ -24,6 +24,13 @@ def test_trade_spec_freezes_stage_five_minimal_execution_ledgers():
         "`analysis_price_line`",
         "`execution_price_line`",
         "阶段五 `trade` 只做最小执行账本",
+        "`PathConfig.source_databases.market_base`",
+        "`planned_trade_date`",
+        "`execution_trade_date`",
+        "`execution_price`",
+        "`portfolio_id + symbol`",
+        "reserved execution status",
+        "次日开盘执行",
     ]
 
     for term in required_terms:
@@ -46,13 +53,19 @@ def test_portfolio_plan_to_trade_bridge_spec_freezes_price_line_and_errata():
         "`trimmed_weight`",
         "`plan_status`",
         "`blocking_reason_code`",
-        "`trade` 的唯一正式上游固定为：",
+        "`trade` 的唯一正式上游固定为",
         "`analysis_price_line`",
         "`execution_price_line`",
         "`reference_trade_date`",
         "`reference_price`",
         "只是最小桥接参考，不等于正式执行价格口径",
         "阶段五只做最小桥接，不扩展到 `carry / exit / system`",
+        "`PathConfig.source_databases.market_base`",
+        "`planned_trade_date`",
+        "`execution_trade_date`",
+        "`execution_price`",
+        "not materialized",
+        "次日开盘执行",
     ]
 
     for term in required_terms:

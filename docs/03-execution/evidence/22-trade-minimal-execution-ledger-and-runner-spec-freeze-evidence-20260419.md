@@ -19,3 +19,4 @@
 
 - `docs/02-spec/08-trade-minimal-execution-ledger-and-runner-spec-v1-20260419.md`
 - `docs/03-execution/22-trade-minimal-execution-ledger-and-runner-spec-freeze-conclusion-20260419.md`
+Implementation freeze evidence: the trade spec now records `PathConfig.source_databases.market_base`, `planned_trade_date`, `execution_trade_date`, `execution_price`, 次日开盘执行, reserved `accepted`, and `portfolio_id + symbol`.

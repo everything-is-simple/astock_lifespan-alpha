@@ -40,6 +40,11 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 阶段四中的 `reference_trade_date / reference_price` 只是最小桥接参考，不等于阶段五之后的正式执行价格口径。
 
+Stage-five implementation defaults are now frozen before engineering work:
+- `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
+- Valid `open` intents use 次日开盘执行: the first later `market_base_day.open`.
+- The first `trade` runner materializes `filled / rejected`; `accepted` is reserved but not written.
+
 ## 文档入口
 
 正式文档请从 [docs/README.md](H:\astock_lifespan-alpha\docs\README.md) 开始阅读。

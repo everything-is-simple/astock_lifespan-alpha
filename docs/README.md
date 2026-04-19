@@ -85,3 +85,8 @@ card -> evidence -> record -> conclusion
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
 - 阶段四 `reference_trade_date / reference_price` 只是最小桥接参考，不等于正式执行价格口径
+
+Stage-five engineering defaults are frozen:
+- `execution_price_line` reads `PathConfig.source_databases.market_base` through the `trade` adapter.
+- `planned_trade_date / execution_trade_date / execution_price` use 次日开盘执行.
+- `accepted` is reserved; the first implementation materializes only `filled / rejected`.

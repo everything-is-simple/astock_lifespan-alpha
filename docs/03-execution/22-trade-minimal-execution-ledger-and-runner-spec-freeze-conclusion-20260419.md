@@ -17,3 +17,4 @@
 ## 3. 影响
 
 - 阶段五后续实现必须以最小执行账本为准，不得回退到旧版 `trade_runtime` 范围。
+Implementation freeze conclusion: accepted stage-five implementation defaults are `PathConfig.source_databases.market_base`, 次日开盘执行, `filled / rejected` materialization, reserved `accepted`, and `portfolio_id + symbol` replay.

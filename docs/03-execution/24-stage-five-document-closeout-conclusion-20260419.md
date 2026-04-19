@@ -18,3 +18,4 @@
 
 - 阶段五从本批次之后才允许进入 `trade` 代码实施。
 - 阶段四 `reference_price / reference_trade_date` 的桥接参考口径已被正式限制，不再等同于正式执行价格口径。
+Implementation freeze conclusion: stage-five may enter trade engineering with execution-price backing, 次日开盘执行, reserved `accepted`, and bounded `portfolio_id + symbol` replay already frozen.

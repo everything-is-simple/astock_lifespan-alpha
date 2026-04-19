@@ -15,3 +15,4 @@
 ## 3. 备注
 
 - 阶段五后续工程实施应严格沿用本批次已冻结文档，不再新增产品决策。
+Implementation freeze record: stage-five documents now freeze the engineering defaults required before implementing `run_trade_from_portfolio_plan`.

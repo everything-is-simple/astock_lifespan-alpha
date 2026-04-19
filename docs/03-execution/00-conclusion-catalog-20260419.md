@@ -147,3 +147,8 @@
 - 结论文件：`docs/03-execution/24-stage-five-document-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段五 `22-23` 文档已完成收口，后续可以进入 `trade` 工程实施。
+
+Stage-five implementation freeze addendum:
+- `execution_price_line` uses `PathConfig.source_databases.market_base`.
+- `planned_trade_date / execution_trade_date / execution_price` use 次日开盘执行.
+- `accepted` is reserved but not materialized; the first runner writes `filled / rejected`.

@@ -14,3 +14,4 @@
 ## 3. 备注
 
 - 价格口径分线在本批次第一次被正式写入当前仓库规格。
+Implementation freeze record: added stage-five implementation defaults for `execution_price_line`, `planned_trade_date / execution_trade_date / execution_price`, reserved `accepted`, and bounded replay by `portfolio_id + symbol`.

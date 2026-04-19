@@ -17,3 +17,4 @@
 ## 3. 影响
 
 - 阶段五实现只能消费 `portfolio_plan_snapshot` 与正式执行价格输入，不得重新打开上游边界。
+Implementation freeze conclusion: `portfolio_plan -> trade` bridge implementation must produce `planned_trade_date / execution_trade_date / execution_price` from the `execution_price_line` adapter and must not materialize `accepted` in the first runner.

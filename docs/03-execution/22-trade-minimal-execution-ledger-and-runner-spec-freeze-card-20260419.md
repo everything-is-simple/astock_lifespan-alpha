@@ -43,3 +43,4 @@
 1. `trade` 最小正式表族被明确写入规格。
 2. 正式 Python 与脚本入口被明确冻结。
 3. 价格分线与最小市场规则校验被明确写入规格。
+Implementation freeze addendum: stage-five engineering uses `PathConfig.source_databases.market_base` as the physical backing for `execution_price_line`, uses 次日开盘执行 for `planned_trade_date / execution_trade_date / execution_price`, keeps `accepted` reserved but not materialized, and replays by `portfolio_id + symbol`.
