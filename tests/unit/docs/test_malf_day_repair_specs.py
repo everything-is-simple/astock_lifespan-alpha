@@ -116,3 +116,30 @@ def test_stage_twelve_malf_day_write_path_replay_unblock_spec_freeze_is_register
 
     for term in required_terms:
         assert term in combined
+
+
+def test_stage_twelve_malf_day_write_path_engineering_closeout_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root
+        / "docs"
+        / "03-execution"
+        / "39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{docs_index}\n{readme}\n{conclusion}"
+    required_terms = [
+        "`39` 阶段十二 MALF day 写路径重演 unblock 工程收口",
+        "`docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`",
+        "`write_timing_summary`",
+        "`write_seconds = 1.491133`",
+        "阶段九重演尚未登记为完成",
+    ]
+
+    for term in required_terms:
+        assert term in combined

@@ -47,6 +47,7 @@ card -> evidence -> record -> conclusion
 27. `docs/02-spec/16-stage-eleven-malf-day-repair-spec-v1-20260419.md`
 28. `docs/02-spec/17-stage-twelve-malf-day-write-path-replay-unblock-spec-v1-20260419.md`
 29. `docs/03-execution/38-stage-twelve-malf-day-write-path-replay-unblock-spec-freeze-conclusion-20260419.md`
+30. `docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -121,6 +122,10 @@ card -> evidence -> record -> conclusion
 - 当前真实主瓶颈已转为 `write_timing`
 - 阶段十二规格冻结闭环 `38` 已补齐
 - `stage-twelve-malf-day-write-path-replay-unblock` 已冻结写路径诊断、优化与阶段九重演 unblock 边界
+- 阶段十二工程收口闭环 `39` 已补齐
+- `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
+- 优化后真实采样窗口 `write_seconds = 1.491133`
+- 真实全量 build 在 35 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -195,3 +200,10 @@ Stage-five engineering defaults are frozen:
 - `guard anchor / reborn window / 历史谱系 profile` 不进入阶段十二
 
 当前正式状态为：阶段十二规格冻结完成，下一批次进入写路径工程实施、真实全量 build 验证与阶段九重演发起。
+
+阶段十二工程收口：
+
+- 工程收口结论：`docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`
+- `write_timing` 已拆分为 `delete_old_rows_seconds / insert_ledgers_seconds / checkpoint_seconds / queue_update_seconds`
+- runner 已支持旧真实库 running 状态下的新库重建与旧库 backup promotion
+- 当前正式状态为：阶段十二工程完成但保留真实全量 build 剩余偏差，阶段九重演尚未完成

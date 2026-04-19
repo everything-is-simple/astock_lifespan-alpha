@@ -235,3 +235,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/38-stage-twelve-malf-day-write-path-replay-unblock-spec-freeze-conclusion-20260419.md`
 - 裁决：`已接收`
 - 说明：`stage-twelve-malf-day-write-path-replay-unblock` 已冻结；下一轮只处理 MALF day 写路径、`write_timing` 细分、真实全量 build 可完成性与阶段九真实重演 unblock。
+
+### `39` 阶段十二 MALF day 写路径重演 unblock 工程收口
+
+- 结论文档：`docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`
+- 裁决：`已接收，保留剩余偏差`
+- 说明：`write_timing_summary` 与 registered relation 写入已落地；真实采样窗口 `write_seconds` 从 `66.626593` 降到 `1.491133`，但真实全量 build 35 分钟内仍未完成，阶段九重演不得登记为完成。

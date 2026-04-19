@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -12,9 +12,17 @@ from uuid import uuid4
 import duckdb
 
 from astock_lifespan_alpha.core.paths import WorkspaceRoots, default_settings
-from astock_lifespan_alpha.malf.contracts import Timeframe
+from astock_lifespan_alpha.malf.contracts import Timeframe, WriteTimingSummary
 from astock_lifespan_alpha.malf.engine import run_malf_engine
-from astock_lifespan_alpha.malf.runner import _insert_result_rows, _replace_symbol_rows, _upsert_checkpoint
+from astock_lifespan_alpha.malf.runner import (
+    _WriteTimingAccumulator,
+    _insert_result_rows,
+    _insert_work_queue_running,
+    _replace_symbol_rows,
+    _time_write_phase,
+    _update_work_queue_status_batch,
+    _upsert_checkpoint,
+)
 from astock_lifespan_alpha.malf.schema import initialize_malf_schema
 from astock_lifespan_alpha.malf.source import (
     DAY_ADJUST_METHOD,
@@ -45,6 +53,7 @@ class PhaseTimingSummary:
     source_load_seconds: float
     engine_seconds: float
     write_seconds: float
+    write_timing_summary: WriteTimingSummary = field(default_factory=WriteTimingSummary)
 
 
 @dataclass(frozen=True)
@@ -54,6 +63,7 @@ class SymbolTimingSummary:
     engine_seconds: float
     write_seconds: float
     total_seconds: float
+    write_timing_summary: WriteTimingSummary = field(default_factory=WriteTimingSummary)
     error: str | None = None
 
 
@@ -135,7 +145,7 @@ def profile_malf_day_real_data(
     initialize_malf_schema(temp_db_path)
 
     engine_seconds_total = 0.0
-    write_seconds_total = 0.0
+    write_timing_total = _WriteTimingAccumulator()
     per_symbol: list[SymbolTimingSummary] = []
     symbol_errors = 0
     truncated_symbols = 0
@@ -154,43 +164,78 @@ def profile_malf_day_real_data(
             symbol_error = str(exc)
             symbol_errors += 1
 
-        write_seconds = 0.0
+        symbol_write_timing = _WriteTimingAccumulator()
         if result is not None:
             with duckdb.connect(str(temp_db_path)) as connection:
                 try:
-                    write_start = perf_counter()
-                    _replace_symbol_rows(connection=connection, timeframe=Timeframe.DAY, symbol=symbol)
-                    _insert_result_rows(connection=connection, run_id=report_id, result=result)
-                    _upsert_checkpoint(
-                        connection=connection,
-                        timeframe=Timeframe.DAY,
-                        symbol=symbol,
-                        run_id=report_id,
-                        last_bar_dt=profiled_bars[-1].bar_dt,
+                    queue_id = f"{report_id}:{symbol}"
+                    _time_write_phase(
+                        symbol_write_timing,
+                        "queue_update_seconds",
+                        lambda: _insert_work_queue_running(
+                            connection=connection,
+                            queue_id=queue_id,
+                            symbol=symbol,
+                            timeframe=Timeframe.DAY,
+                            source_bar_count=len(profiled_bars),
+                            last_bar_dt=profiled_bars[-1].bar_dt,
+                        ),
                     )
-                    write_seconds = round(perf_counter() - write_start, 6)
+                    _time_write_phase(
+                        symbol_write_timing,
+                        "delete_old_rows_seconds",
+                        lambda: _replace_symbol_rows(connection=connection, timeframe=Timeframe.DAY, symbol=symbol),
+                    )
+                    _time_write_phase(
+                        symbol_write_timing,
+                        "insert_ledgers_seconds",
+                        lambda: _insert_result_rows(connection=connection, run_id=report_id, result=result),
+                    )
+                    _time_write_phase(
+                        symbol_write_timing,
+                        "checkpoint_seconds",
+                        lambda: _upsert_checkpoint(
+                            connection=connection,
+                            timeframe=Timeframe.DAY,
+                            symbol=symbol,
+                            run_id=report_id,
+                            last_bar_dt=profiled_bars[-1].bar_dt,
+                        ),
+                    )
+                    _time_write_phase(
+                        symbol_write_timing,
+                        "queue_update_seconds",
+                        lambda: _update_work_queue_status_batch(
+                            connection=connection,
+                            queue_ids=[queue_id],
+                            status="completed",
+                        ),
+                    )
                 except Exception as exc:
-                    write_seconds = round(perf_counter() - write_start, 6)
                     symbol_error = str(exc)
                     symbol_errors += 1
 
+        symbol_write_summary = symbol_write_timing.as_summary()
+        write_timing_total.add(symbol_write_timing)
         engine_seconds_total += engine_seconds
-        write_seconds_total += write_seconds
         per_symbol.append(
             SymbolTimingSummary(
                 symbol=symbol,
                 bar_count=len(profiled_bars),
                 engine_seconds=engine_seconds,
-                write_seconds=write_seconds,
-                total_seconds=round(engine_seconds + write_seconds, 6),
+                write_seconds=symbol_write_summary.write_seconds,
+                total_seconds=round(engine_seconds + symbol_write_summary.write_seconds, 6),
+                write_timing_summary=symbol_write_summary,
                 error=symbol_error,
             )
         )
 
+    write_timing_summary = write_timing_total.as_summary()
     timings = PhaseTimingSummary(
         source_load_seconds=round(source_load_seconds, 6),
         engine_seconds=round(engine_seconds_total, 6),
-        write_seconds=round(write_seconds_total, 6),
+        write_seconds=write_timing_summary.write_seconds,
+        write_timing_summary=write_timing_summary,
     )
     bottleneck_stage = _classify_bottleneck(timings)
     top_slow_symbols = sorted(per_symbol, key=lambda item: item.total_seconds, reverse=True)[:top_n]
@@ -386,6 +431,10 @@ def _render_markdown_report(report: MalfDayDiagnosticReport) -> str:
             f"- source load timing: `{report.timings.source_load_seconds}`",
             f"- engine timing: `{report.timings.engine_seconds}`",
             f"- write timing: `{report.timings.write_seconds}`",
+            f"- delete old rows timing: `{report.timings.write_timing_summary.delete_old_rows_seconds}`",
+            f"- insert ledgers timing: `{report.timings.write_timing_summary.insert_ledgers_seconds}`",
+            f"- checkpoint timing: `{report.timings.write_timing_summary.checkpoint_seconds}`",
+            f"- queue update timing: `{report.timings.write_timing_summary.queue_update_seconds}`",
             "",
             "## Top Slow Symbols",
             "",
@@ -397,7 +446,11 @@ def _render_markdown_report(report: MalfDayDiagnosticReport) -> str:
         for item in report.top_slow_symbols:
             lines.append(
                 f"- `{item.symbol}` bars=`{item.bar_count}` total=`{item.total_seconds}` "
-                f"engine=`{item.engine_seconds}` write=`{item.write_seconds}`"
+                f"engine=`{item.engine_seconds}` write=`{item.write_seconds}` "
+                f"delete=`{item.write_timing_summary.delete_old_rows_seconds}` "
+                f"insert=`{item.write_timing_summary.insert_ledgers_seconds}` "
+                f"checkpoint=`{item.write_timing_summary.checkpoint_seconds}` "
+                f"queue=`{item.write_timing_summary.queue_update_seconds}`"
                 + (f" error=`{item.error}`" if item.error else "")
             )
     lines.extend(["", report.message, ""])

@@ -79,6 +79,7 @@ card -> evidence -> record -> conclusion
 - `36` 阶段十一 MALF day repair 规格冻结
 - `37` 阶段十一 MALF day repair 工程收口
 - `38` 阶段十二 MALF day 写路径重演 unblock 规格冻结
+- `39` 阶段十二 MALF day 写路径重演 unblock 工程收口
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -116,3 +117,10 @@ Stage-five implementation defaults are frozen for engineering:
 - 下一轮只处理 MALF day 写路径与阶段九真实重演 unblock
 - `write_timing` 至少拆成 `delete old rows / insert ledgers / checkpoint / queue update`
 - `guard anchor / reborn window / 历史谱系 profile` 明确排除在阶段十二之外
+
+## 阶段十二工程补充
+
+- `39` 阶段十二 MALF day 写路径重演 unblock 工程收口
+- `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
+- 优化后真实采样窗口 `write_seconds = 1.491133`
+- 当前剩余偏差：真实全量 build 在 35 分钟观察窗内仍未完成，阶段九重演尚未登记为完成

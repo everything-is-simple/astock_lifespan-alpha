@@ -41,6 +41,17 @@ def test_malf_day_real_data_diagnostics_writes_report(monkeypatch, tmp_path):
     assert payload["source"]["table_name"] == "stock_daily_adjusted"
     assert payload["source"]["selected_adjust_method"] == "backward"
     assert payload["timings"]["source_load_seconds"] >= 0.0
+    assert payload["timings"]["write_timing_summary"]["write_seconds"] >= 0.0
+    assert payload["timings"]["write_timing_summary"]["delete_old_rows_seconds"] >= 0.0
+    assert payload["timings"]["write_timing_summary"]["insert_ledgers_seconds"] >= 0.0
+    assert payload["timings"]["write_timing_summary"]["checkpoint_seconds"] >= 0.0
+    assert payload["timings"]["write_timing_summary"]["queue_update_seconds"] >= 0.0
+    assert payload["top_slow_symbols"][0]["write_timing_summary"]["write_seconds"] >= 0.0
+    markdown = Path(report.report_markdown_path).read_text(encoding="utf-8")
+    assert "delete old rows timing" in markdown
+    assert "insert ledgers timing" in markdown
+    assert "checkpoint timing" in markdown
+    assert "queue update timing" in markdown
 
 
 def test_malf_day_real_data_diagnostics_records_duplicate_backward_contract_violation(monkeypatch, tmp_path):

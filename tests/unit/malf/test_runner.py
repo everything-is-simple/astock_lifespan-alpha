@@ -58,6 +58,12 @@ def test_malf_day_runner_materializes_semantic_outputs(monkeypatch, tmp_path):
     assert summary.status == "completed"
     assert summary.materialization_counts["wave_scale_snapshot_rows"] == 6
     assert summary.checkpoint_summary.symbols_updated == 1
+    timing = summary.as_dict()["write_timing_summary"]
+    assert timing["write_seconds"] >= 0.0
+    assert timing["delete_old_rows_seconds"] >= 0.0
+    assert timing["insert_ledgers_seconds"] >= 0.0
+    assert timing["checkpoint_seconds"] >= 0.0
+    assert timing["queue_update_seconds"] >= 0.0
 
     target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
     with duckdb.connect(str(target_path), read_only=True) as connection:
@@ -169,6 +175,36 @@ def test_malf_day_source_filters_stock_daily_adjusted_to_backward(monkeypatch, t
     assert [bar.bar_dt.date().isoformat() for bar in source.bars_by_symbol["AAA"]] == ["2026-01-02", "2026-01-03"]
     assert source.bars_by_symbol["AAA"][0].open == 20.0
     assert source.bars_by_symbol["AAA"][0].close == 20.8
+
+
+def test_malf_day_runner_batches_multi_symbol_writes(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    rows = []
+    for symbol in ("AAA", "BBB", "CCC"):
+        rows.extend(
+            [
+                (symbol, "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+                (symbol, "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+                (symbol, "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+                (symbol, "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+            ]
+        )
+    _write_day_source_bars(workspace / "data" / "base" / "market_base.duckdb", rows)
+
+    summary = run_malf_day_build()
+
+    assert summary.checkpoint_summary.symbols_updated == 3
+    target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        snapshot_count = connection.execute("SELECT COUNT(*) FROM malf_wave_scale_snapshot").fetchone()[0]
+        checkpoint_count = connection.execute("SELECT COUNT(*) FROM malf_checkpoint").fetchone()[0]
+        completed_queue_count = connection.execute(
+            "SELECT COUNT(*) FROM malf_work_queue WHERE status = 'completed'"
+        ).fetchone()[0]
+
+    assert snapshot_count == 12
+    assert checkpoint_count == 3
+    assert completed_queue_count == 3
 
 
 def test_malf_day_runner_fails_fast_on_duplicate_backward_rows(monkeypatch, tmp_path):

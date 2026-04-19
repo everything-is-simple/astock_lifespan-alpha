@@ -75,6 +75,26 @@ class CheckpointSummary:
 
 
 @dataclass(frozen=True)
+class WriteTimingSummary:
+    """Write-path timing summary returned by MALF runners and diagnostics."""
+
+    delete_old_rows_seconds: float = 0.0
+    insert_ledgers_seconds: float = 0.0
+    checkpoint_seconds: float = 0.0
+    queue_update_seconds: float = 0.0
+    write_seconds: float = 0.0
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "delete_old_rows_seconds": self.delete_old_rows_seconds,
+            "insert_ledgers_seconds": self.insert_ledgers_seconds,
+            "checkpoint_seconds": self.checkpoint_seconds,
+            "queue_update_seconds": self.queue_update_seconds,
+            "write_seconds": self.write_seconds,
+        }
+
+
+@dataclass(frozen=True)
 class MalfRunSummary:
     """Stable stage-two MALF runner summary."""
 
@@ -89,6 +109,7 @@ class MalfRunSummary:
     checkpoint_summary: CheckpointSummary = field(
         default_factory=lambda: CheckpointSummary(symbols_seen=0, symbols_updated=0, latest_bar_dt=None)
     )
+    write_timing_summary: WriteTimingSummary = field(default_factory=WriteTimingSummary)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -101,4 +122,5 @@ class MalfRunSummary:
             "message": self.message,
             "materialization_counts": dict(self.materialization_counts),
             "checkpoint_summary": self.checkpoint_summary.as_dict(),
+            "write_timing_summary": self.write_timing_summary.as_dict(),
         }
