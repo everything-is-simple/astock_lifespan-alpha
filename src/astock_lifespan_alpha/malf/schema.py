@@ -32,19 +32,54 @@ def initialize_malf_schema(database_path: Path) -> None:
                 status TEXT NOT NULL,
                 source_path TEXT,
                 input_rows BIGINT NOT NULL DEFAULT 0,
+                symbols_total BIGINT NOT NULL DEFAULT 0,
                 symbols_seen BIGINT NOT NULL DEFAULT 0,
+                symbols_completed BIGINT NOT NULL DEFAULT 0,
                 symbols_updated BIGINT NOT NULL DEFAULT 0,
                 inserted_pivots BIGINT NOT NULL DEFAULT 0,
                 inserted_waves BIGINT NOT NULL DEFAULT 0,
                 inserted_state_snapshots BIGINT NOT NULL DEFAULT 0,
                 inserted_wave_scale_snapshots BIGINT NOT NULL DEFAULT 0,
                 inserted_wave_scale_profiles BIGINT NOT NULL DEFAULT 0,
+                current_symbol TEXT,
+                elapsed_seconds DOUBLE NOT NULL DEFAULT 0,
+                estimated_remaining_symbols BIGINT NOT NULL DEFAULT 0,
                 latest_bar_dt TIMESTAMP,
                 message TEXT,
                 started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 finished_at TIMESTAMP
             )
             """
+        )
+        _ensure_column(
+            connection=connection,
+            table_name="malf_run",
+            column_name="symbols_total",
+            column_sql="BIGINT NOT NULL DEFAULT 0",
+        )
+        _ensure_column(
+            connection=connection,
+            table_name="malf_run",
+            column_name="symbols_completed",
+            column_sql="BIGINT NOT NULL DEFAULT 0",
+        )
+        _ensure_column(
+            connection=connection,
+            table_name="malf_run",
+            column_name="current_symbol",
+            column_sql="TEXT",
+        )
+        _ensure_column(
+            connection=connection,
+            table_name="malf_run",
+            column_name="elapsed_seconds",
+            column_sql="DOUBLE NOT NULL DEFAULT 0",
+        )
+        _ensure_column(
+            connection=connection,
+            table_name="malf_run",
+            column_name="estimated_remaining_symbols",
+            column_sql="BIGINT NOT NULL DEFAULT 0",
         )
         connection.execute(
             """
@@ -171,3 +206,16 @@ def initialize_malf_schema(database_path: Path) -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_malf_checkpoint_tf ON malf_checkpoint(timeframe, symbol)"
         )
+
+
+def _ensure_column(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    columns = {row[1] for row in connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()}
+    if column_name in columns:
+        return
+    connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")

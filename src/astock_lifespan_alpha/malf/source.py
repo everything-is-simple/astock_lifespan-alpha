@@ -83,6 +83,7 @@ class LoadedRowsResult:
 class StreamedRowsResult:
     source_path: Path | None
     rows_by_symbol: Iterable[tuple[str, list[OhlcBar]]]
+    selected_symbols: tuple[str, ...] = ()
     selected_adjust_method: str | None = None
 
 
@@ -90,12 +91,32 @@ class SourceContractViolationError(ValueError):
     """Raised when the loaded source bars violate the formal MALF source contract."""
 
 
-def load_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> SourceBars:
+def load_source_bars(
+    settings: WorkspaceRoots,
+    timeframe: Timeframe,
+    *,
+    start_symbol: str | None = None,
+    end_symbol: str | None = None,
+    symbol_limit: int | None = None,
+) -> SourceBars:
     """Load fact-layer bars for the requested timeframe."""
-    return load_source_bars_limited(settings, timeframe, symbol_limit=None)
+    return load_source_bars_limited(
+        settings,
+        timeframe,
+        start_symbol=start_symbol,
+        end_symbol=end_symbol,
+        symbol_limit=symbol_limit,
+    )
 
 
-def stream_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> StreamedRowsResult:
+def stream_source_bars(
+    settings: WorkspaceRoots,
+    timeframe: Timeframe,
+    *,
+    start_symbol: str | None = None,
+    end_symbol: str | None = None,
+    symbol_limit: int | None = None,
+) -> StreamedRowsResult:
     """Stream fact-layer bars grouped by symbol for memory-bounded runner execution."""
 
     resolved_source = resolve_source_table(settings, timeframe)
@@ -104,11 +125,21 @@ def stream_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> Stream
             resolved_source.source_path,
             resolved_source.table_name,
             timeframe=timeframe,
+            start_symbol=start_symbol,
+            end_symbol=end_symbol,
+            symbol_limit=symbol_limit,
         )
-    loaded_source = load_source_bars(settings, timeframe)
+    loaded_source = load_source_bars(
+        settings,
+        timeframe,
+        start_symbol=start_symbol,
+        end_symbol=end_symbol,
+        symbol_limit=symbol_limit,
+    )
     return StreamedRowsResult(
         source_path=loaded_source.source_path,
         rows_by_symbol=loaded_source.bars_by_symbol.items(),
+        selected_symbols=tuple(sorted(loaded_source.bars_by_symbol)),
         selected_adjust_method=loaded_source.selected_adjust_method,
     )
 
@@ -117,6 +148,8 @@ def load_source_bars_limited(
     settings: WorkspaceRoots,
     timeframe: Timeframe,
     *,
+    start_symbol: str | None = None,
+    end_symbol: str | None = None,
     symbol_limit: int | None,
 ) -> SourceBars:
     """Load fact-layer bars with an optional symbol limit for diagnostics."""
@@ -127,6 +160,8 @@ def load_source_bars_limited(
             resolved_source.source_path,
             resolved_source.table_name,
             timeframe=timeframe,
+            start_symbol=start_symbol,
+            end_symbol=end_symbol,
             symbol_limit=symbol_limit,
         )
         if direct_rows.rows:
@@ -189,6 +224,8 @@ def _load_rows_from_database(database_path: Path, table_candidates: tuple[str, .
         database_path,
         table_name,
         timeframe=Timeframe.DAY,
+        start_symbol=None,
+        end_symbol=None,
         symbol_limit=None,
     ).rows
 
@@ -198,10 +235,19 @@ def _load_rows_from_table(
     table_name: str,
     *,
     timeframe: Timeframe,
+    start_symbol: str | None,
+    end_symbol: str | None,
     symbol_limit: int | None,
 ) -> LoadedRowsResult:
     with duckdb.connect(str(database_path), read_only=True) as connection:
-        return _query_ohlc_rows(connection, table_name, timeframe=timeframe, symbol_limit=symbol_limit)
+        return _query_ohlc_rows(
+            connection,
+            table_name,
+            timeframe=timeframe,
+            start_symbol=start_symbol,
+            end_symbol=end_symbol,
+            symbol_limit=symbol_limit,
+        )
 
 
 def _stream_rows_from_table(
@@ -209,11 +255,32 @@ def _stream_rows_from_table(
     table_name: str,
     *,
     timeframe: Timeframe,
+    start_symbol: str | None,
+    end_symbol: str | None,
+    symbol_limit: int | None,
 ) -> StreamedRowsResult:
     with duckdb.connect(str(database_path), read_only=True) as connection:
         column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
-    column_names = {row[1] for row in column_info}
-    selected_adjust_method = DAY_ADJUST_METHOD if timeframe is Timeframe.DAY and "adjust_method" in column_names else None
+        column_names = {row[1] for row in column_info}
+        symbol_column = _pick_required_column(column_names, ("symbol", "code"))
+        base_where_clause = ""
+        base_params: list[object] = []
+        selected_adjust_method = DAY_ADJUST_METHOD if timeframe is Timeframe.DAY and "adjust_method" in column_names else None
+        if timeframe is Timeframe.DAY and "adjust_method" in column_names:
+            base_where_clause = "WHERE adjust_method = ?"
+            base_params = [DAY_ADJUST_METHOD]
+        symbols = tuple(
+            _select_filtered_symbols(
+                connection=connection,
+                table_name=table_name,
+                symbol_column=symbol_column,
+                base_where_clause=base_where_clause,
+                base_params=base_params,
+                start_symbol=start_symbol,
+                end_symbol=end_symbol,
+                symbol_limit=symbol_limit,
+            )
+        )
 
     def _generator() -> Iterable[tuple[str, list[OhlcBar]]]:
         with duckdb.connect(str(database_path), read_only=True) as connection:
@@ -230,18 +297,6 @@ def _stream_rows_from_table(
             if timeframe is Timeframe.DAY and "adjust_method" in column_names:
                 where_clause = "WHERE adjust_method = ?"
                 params = [DAY_ADJUST_METHOD]
-            symbols = [
-                str(row[0])
-                for row in connection.execute(
-                    f"""
-                    SELECT DISTINCT {symbol_column}
-                    FROM {table_name}
-                    {where_clause}
-                    ORDER BY 1
-                    """,
-                    params,
-                ).fetchall()
-            ]
             for symbol in symbols:
                 symbol_where_clause = f"{where_clause} {'AND' if where_clause else 'WHERE'} {symbol_column} = ?"
                 symbol_rows = connection.execute(
@@ -280,6 +335,7 @@ def _stream_rows_from_table(
     return StreamedRowsResult(
         source_path=database_path,
         rows_by_symbol=_generator(),
+        selected_symbols=symbols,
         selected_adjust_method=selected_adjust_method,
     )
 
@@ -289,6 +345,8 @@ def _query_ohlc_rows(
     table_name: str,
     *,
     timeframe: Timeframe,
+    start_symbol: str | None,
+    end_symbol: str | None,
     symbol_limit: int | None,
 ) -> LoadedRowsResult:
     column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
@@ -306,11 +364,16 @@ def _query_ohlc_rows(
         where_parts.append("adjust_method = ?")
         params.append(DAY_ADJUST_METHOD)
         selected_adjust_method = DAY_ADJUST_METHOD
-    if symbol_limit is not None:
-        selected_symbols = _select_symbol_prefix_sample(
+    selected_symbols: list[str] | None = None
+    if start_symbol is not None or end_symbol is not None or symbol_limit is not None:
+        selected_symbols = _select_filtered_symbols(
             connection=connection,
             table_name=table_name,
             symbol_column=symbol_column,
+            base_where_clause=f"WHERE {' AND '.join(where_parts)}" if where_parts else "",
+            base_params=params,
+            start_symbol=start_symbol,
+            end_symbol=end_symbol,
             symbol_limit=symbol_limit,
         )
         if not selected_symbols:
@@ -349,41 +412,47 @@ def _query_ohlc_rows(
         selected_adjust_method=selected_adjust_method,
     )
 
-
-def _select_symbol_prefix_sample(
+def _select_filtered_symbols(
     *,
     connection: duckdb.DuckDBPyConnection,
     table_name: str,
     symbol_column: str,
-    symbol_limit: int,
+    base_where_clause: str,
+    base_params: list[object],
+    start_symbol: str | None,
+    end_symbol: str | None,
+    symbol_limit: int | None,
 ) -> list[str]:
-    selected: list[str] = []
-    seen: set[str] = set()
-    offset = 0
-    batch_size = max(symbol_limit * 500, 10000)
-    max_scan_rows = max(batch_size * 10, 100000)
-
-    while len(selected) < symbol_limit and offset < max_scan_rows:
-        rows = connection.execute(
-            f"""
-            SELECT {symbol_column}
-            FROM {table_name}
-            LIMIT ? OFFSET ?
-            """,
-            [batch_size, offset],
-        ).fetchall()
-        if not rows:
-            break
-        for (symbol,) in rows:
-            symbol_value = str(symbol)
-            if symbol_value in seen:
-                continue
-            seen.add(symbol_value)
-            selected.append(symbol_value)
-            if len(selected) >= symbol_limit:
-                break
-        offset += batch_size
-    return selected
+    where_parts: list[str] = []
+    params = list(base_params)
+    if start_symbol is not None:
+        where_parts.append(f"{symbol_column} >= ?")
+        params.append(start_symbol)
+    if end_symbol is not None:
+        where_parts.append(f"{symbol_column} <= ?")
+        params.append(end_symbol)
+    joined_where = ""
+    if base_where_clause and where_parts:
+        joined_where = f"{base_where_clause} AND {' AND '.join(where_parts)}"
+    elif base_where_clause:
+        joined_where = base_where_clause
+    elif where_parts:
+        joined_where = f"WHERE {' AND '.join(where_parts)}"
+    limit_clause = ""
+    if symbol_limit is not None:
+        limit_clause = "LIMIT ?"
+        params.append(symbol_limit)
+    rows = connection.execute(
+        f"""
+        SELECT DISTINCT {symbol_column}
+        FROM {table_name}
+        {joined_where}
+        ORDER BY 1
+        {limit_clause}
+        """,
+        params,
+    ).fetchall()
+    return [str(row[0]) for row in rows]
 
 
 def _pick_required_column(column_names: set[str], candidates: tuple[str, ...]) -> str:

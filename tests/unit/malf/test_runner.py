@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 
 import duckdb
 import pytest
 
+import astock_lifespan_alpha.malf.runner as malf_runner_module
 from astock_lifespan_alpha.malf import run_malf_day_build, run_malf_month_build, run_malf_week_build
 from astock_lifespan_alpha.malf.source import load_source_bars
 from astock_lifespan_alpha.core.paths import default_settings
@@ -58,12 +61,20 @@ def test_malf_day_runner_materializes_semantic_outputs(monkeypatch, tmp_path):
     assert summary.status == "completed"
     assert summary.materialization_counts["wave_scale_snapshot_rows"] == 6
     assert summary.checkpoint_summary.symbols_updated == 1
+    assert summary.segment_summary.full_universe is True
+    assert summary.progress_summary.symbols_total == 1
+    assert summary.progress_summary.symbols_completed == 1
+    assert summary.progress_summary.progress_path is not None
     timing = summary.as_dict()["write_timing_summary"]
     assert timing["write_seconds"] >= 0.0
     assert timing["delete_old_rows_seconds"] >= 0.0
     assert timing["insert_ledgers_seconds"] >= 0.0
     assert timing["checkpoint_seconds"] >= 0.0
     assert timing["queue_update_seconds"] >= 0.0
+    progress_payload = json.loads(Path(summary.progress_summary.progress_path).read_text(encoding="utf-8"))
+    assert progress_payload["symbols_total"] == 1
+    assert progress_payload["symbols_completed"] == 1
+    assert progress_payload["ledger_rows_written"]["wave_scale_snapshot_rows"] == 6
 
     target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
     with duckdb.connect(str(target_path), read_only=True) as connection:
@@ -205,6 +216,150 @@ def test_malf_day_runner_batches_multi_symbol_writes(monkeypatch, tmp_path):
     assert snapshot_count == 12
     assert checkpoint_count == 3
     assert completed_queue_count == 3
+
+
+def test_malf_day_runner_filters_symbols_by_range_and_limit(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    rows = []
+    for symbol in ("AAA", "BBB", "CCC", "DDD"):
+        rows.extend(
+            [
+                (symbol, "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+                (symbol, "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+                (symbol, "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+                (symbol, "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+            ]
+        )
+    _write_day_source_bars(workspace / "data" / "base" / "market_base.duckdb", rows)
+
+    summary = run_malf_day_build(start_symbol="BBB", end_symbol="DDD", symbol_limit=2)
+
+    assert summary.segment_summary.start_symbol == "BBB"
+    assert summary.segment_summary.end_symbol == "DDD"
+    assert summary.segment_summary.symbol_limit == 2
+    assert summary.segment_summary.full_universe is False
+    assert summary.progress_summary.symbols_total == 2
+    assert summary.progress_summary.symbols_seen == 2
+    assert summary.progress_summary.symbols_completed == 2
+    target_path = Path(summary.artifact_summary.active_build_path)
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        checkpoint_symbols = [
+            row[0]
+            for row in connection.execute("SELECT symbol FROM malf_checkpoint ORDER BY symbol").fetchall()
+        ]
+
+    assert checkpoint_symbols == ["BBB", "CCC"]
+
+
+def test_malf_day_runner_full_universe_resumes_segmented_build_and_promotes(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    rows = []
+    for symbol in ("AAA", "BBB", "CCC"):
+        rows.extend(
+            [
+                (symbol, "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+                (symbol, "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+                (symbol, "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+                (symbol, "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+            ]
+        )
+    _write_day_source_bars(workspace / "data" / "base" / "market_base.duckdb", rows)
+
+    first_summary = run_malf_day_build(symbol_limit=2)
+    assert first_summary.artifact_summary.promoted_to_target is False
+    assert first_summary.artifact_summary.active_build_path is not None
+
+    second_summary = run_malf_day_build()
+
+    assert second_summary.progress_summary.symbols_total == 3
+    assert second_summary.progress_summary.symbols_completed == 3
+    assert second_summary.checkpoint_summary.symbols_updated == 1
+    assert second_summary.artifact_summary.promoted_to_target is True
+    target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        checkpoint_count = connection.execute("SELECT COUNT(*) FROM malf_checkpoint").fetchone()[0]
+
+    assert checkpoint_count == 3
+
+
+def test_malf_day_runner_resume_continues_after_partial_failure(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    source_path = workspace / "data" / "base" / "market_base.duckdb"
+    _write_day_source_bars(
+        source_path,
+        [
+            ("AAA", "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+            ("AAA", "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+            ("AAA", "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+            ("BBB", "2026-01-02T00:00:00", 8.0, 8.8, 7.8, 8.4),
+            ("BBB", "2026-01-03T00:00:00", 8.4, 9.2, 8.2, 9.0),
+            ("BBB", "2026-01-04T00:00:00", 9.0, 9.1, 8.4, 8.6),
+            ("BBB", "2026-01-05T00:00:00", 8.6, 8.7, 8.0, 8.1),
+        ],
+    )
+
+    monkeypatch.setattr(malf_runner_module, "_WRITE_BATCH_SYMBOL_LIMIT", 1)
+    original_run_malf_engine = malf_runner_module.run_malf_engine
+    call_count = {"BBB": 0}
+
+    def failing_engine(*, symbol, timeframe, bars):
+        if symbol == "BBB" and call_count["BBB"] == 0:
+            call_count["BBB"] += 1
+            raise RuntimeError("synthetic interruption")
+        return original_run_malf_engine(symbol=symbol, timeframe=timeframe, bars=bars)
+
+    monkeypatch.setattr(malf_runner_module, "run_malf_engine", failing_engine)
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        run_malf_day_build(symbol_limit=2)
+
+    monkeypatch.setattr(malf_runner_module, "run_malf_engine", original_run_malf_engine)
+    summary = run_malf_day_build(symbol_limit=2)
+
+    assert summary.progress_summary.symbols_total == 2
+    assert summary.progress_summary.symbols_completed == 2
+    assert summary.checkpoint_summary.symbols_updated == 1
+    target_path = Path(summary.artifact_summary.active_build_path)
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        checkpoint_symbols = [
+            row[0]
+            for row in connection.execute("SELECT symbol FROM malf_checkpoint ORDER BY symbol").fetchall()
+        ]
+
+    assert checkpoint_symbols == ["AAA", "BBB"]
+
+
+def test_malf_day_runner_reports_progress_and_abandoned_build_artifacts(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_day_source_bars(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+            ("AAA", "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+            ("AAA", "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+        ],
+    )
+    malf_root = workspace / "data" / "astock_lifespan_alpha" / "malf"
+    malf_root.mkdir(parents=True, exist_ok=True)
+    abandoned_path = malf_root / "malf_day.day-abandoned.building.duckdb"
+    active_path = malf_root / "malf_day.day-active.building.duckdb"
+    abandoned_path.touch()
+    active_path.touch()
+    os.utime(abandoned_path, (1, 1))
+    os.utime(active_path, (2, 2))
+
+    summary = run_malf_day_build(symbol_limit=1)
+
+    assert summary.artifact_summary.active_build_path == str(active_path)
+    assert str(abandoned_path) in summary.artifact_summary.abandoned_build_artifacts
+    assert abandoned_path.exists()
+    progress_path = Path(summary.progress_summary.progress_path)
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress_payload["symbols_seen"] == 1
+    assert progress_payload["symbols_completed"] == 1
+    assert progress_payload["estimated_remaining_symbols"] == 0
+    assert progress_payload["ledger_rows_written"]["wave_rows"] >= 1
 
 
 def test_malf_day_runner_fails_fast_on_duplicate_backward_rows(monkeypatch, tmp_path):

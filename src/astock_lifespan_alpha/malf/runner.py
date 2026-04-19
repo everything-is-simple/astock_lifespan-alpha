@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass, field
 from datetime import datetime
-from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -12,9 +13,12 @@ import duckdb
 
 from astock_lifespan_alpha.core.paths import WorkspaceRoots, default_settings
 from astock_lifespan_alpha.malf.contracts import (
+    ArtifactSummary,
     CheckpointSummary,
     MalfRunSummary,
+    ProgressSummary,
     RunStatus,
+    SegmentSummary,
     Timeframe,
     WriteTimingSummary,
 )
@@ -58,12 +62,6 @@ class _WriteTimingAccumulator:
     checkpoint_seconds: float = 0.0
     queue_update_seconds: float = 0.0
 
-    def add(self, other: "_WriteTimingAccumulator") -> None:
-        self.delete_old_rows_seconds += other.delete_old_rows_seconds
-        self.insert_ledgers_seconds += other.insert_ledgers_seconds
-        self.checkpoint_seconds += other.checkpoint_seconds
-        self.queue_update_seconds += other.queue_update_seconds
-
     def as_summary(self) -> WriteTimingSummary:
         delete_old_rows_seconds = round(self.delete_old_rows_seconds, 6)
         insert_ledgers_seconds = round(self.insert_ledgers_seconds, 6)
@@ -84,6 +82,60 @@ class _WriteTimingAccumulator:
         )
 
 
+@dataclass(frozen=True)
+class _SegmentSelection:
+    start_symbol: str | None = None
+    end_symbol: str | None = None
+    symbol_limit: int | None = None
+    resume: bool = True
+    full_universe: bool = True
+
+    def as_summary(self) -> SegmentSummary:
+        return SegmentSummary(
+            start_symbol=self.start_symbol,
+            end_symbol=self.end_symbol,
+            symbol_limit=self.symbol_limit,
+            resume=self.resume,
+            full_universe=self.full_universe,
+        )
+
+
+@dataclass(frozen=True)
+class _DayBuildArtifacts:
+    active_target_path: Path
+    active_build_path: Path | None
+    abandoned_build_artifacts: tuple[Path, ...]
+
+
+@dataclass
+class _RunProgressState:
+    progress_path: Path | None
+    symbols_total: int
+    materialization_counts: dict[str, int]
+    started_at: float = field(default_factory=perf_counter)
+    symbols_seen: int = 0
+    symbols_completed: int = 0
+    current_symbol: str | None = None
+
+    def elapsed_seconds(self) -> float:
+        return round(perf_counter() - self.started_at, 6)
+
+    def estimated_remaining_symbols(self) -> int:
+        return max(self.symbols_total - self.symbols_completed, 0)
+
+    def as_summary(self) -> ProgressSummary:
+        return ProgressSummary(
+            symbols_total=self.symbols_total,
+            symbols_seen=self.symbols_seen,
+            symbols_completed=self.symbols_completed,
+            current_symbol=self.current_symbol,
+            elapsed_seconds=self.elapsed_seconds(),
+            estimated_remaining_symbols=self.estimated_remaining_symbols(),
+            ledger_rows_written=dict(self.materialization_counts),
+            progress_path=str(self.progress_path) if self.progress_path is not None else None,
+        )
+
+
 def _time_write_phase(accumulator: _WriteTimingAccumulator, phase_name: str, operation):
     started_at = perf_counter()
     try:
@@ -93,8 +145,25 @@ def _time_write_phase(accumulator: _WriteTimingAccumulator, phase_name: str, ope
         setattr(accumulator, phase_name, getattr(accumulator, phase_name) + elapsed)
 
 
-def run_malf_day_build(*, settings: WorkspaceRoots | None = None) -> MalfRunSummary:
-    return _run_malf_build(runner_name="run_malf_day_build", timeframe=Timeframe.DAY, settings=settings)
+def run_malf_day_build(
+    *,
+    start_symbol: str | None = None,
+    end_symbol: str | None = None,
+    symbol_limit: int | None = None,
+    resume: bool = True,
+    progress_path: Path | None = None,
+    settings: WorkspaceRoots | None = None,
+) -> MalfRunSummary:
+    return _run_malf_build(
+        runner_name="run_malf_day_build",
+        timeframe=Timeframe.DAY,
+        start_symbol=start_symbol,
+        end_symbol=end_symbol,
+        symbol_limit=symbol_limit,
+        resume=resume,
+        progress_path=progress_path,
+        settings=settings,
+    )
 
 
 def run_malf_week_build(*, settings: WorkspaceRoots | None = None) -> MalfRunSummary:
@@ -103,14 +172,6 @@ def run_malf_week_build(*, settings: WorkspaceRoots | None = None) -> MalfRunSum
 
 def run_malf_month_build(*, settings: WorkspaceRoots | None = None) -> MalfRunSummary:
     return _run_malf_build(runner_name="run_malf_month_build", timeframe=Timeframe.MONTH, settings=settings)
-
-
-def _resolve_active_target_path(*, target_path: Path, timeframe: Timeframe, run_id: str) -> Path:
-    if timeframe is not Timeframe.DAY or not target_path.exists():
-        return target_path
-    if not _target_has_incomplete_work(target_path):
-        return target_path
-    return target_path.with_name(f"{target_path.stem}.{run_id}.building{target_path.suffix}")
 
 
 def _target_has_incomplete_work(target_path: Path) -> bool:
@@ -134,6 +195,40 @@ def _target_has_incomplete_work(target_path: Path) -> bool:
     return False
 
 
+def _resolve_day_build_artifacts(
+    *,
+    target_path: Path,
+    run_id: str,
+    selection: _SegmentSelection,
+) -> _DayBuildArtifacts:
+    pattern = f"{target_path.stem}.*.building{target_path.suffix}"
+    existing_builds = tuple(
+        sorted(
+            target_path.parent.glob(pattern),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    )
+    if selection.resume and existing_builds:
+        return _DayBuildArtifacts(
+            active_target_path=existing_builds[0],
+            active_build_path=existing_builds[0],
+            abandoned_build_artifacts=existing_builds[1:],
+        )
+    if not selection.full_universe or (target_path.exists() and _target_has_incomplete_work(target_path)):
+        build_path = target_path.with_name(f"{target_path.stem}.{run_id}.building{target_path.suffix}")
+        return _DayBuildArtifacts(
+            active_target_path=build_path,
+            active_build_path=build_path,
+            abandoned_build_artifacts=existing_builds,
+        )
+    return _DayBuildArtifacts(
+        active_target_path=target_path,
+        active_build_path=None,
+        abandoned_build_artifacts=existing_builds,
+    )
+
+
 def _promote_rebuilt_database(*, build_path: Path, target_path: Path, run_id: str) -> None:
     backup_path = target_path.with_name(f"{target_path.stem}.backup-{run_id}{target_path.suffix}")
     if target_path.exists():
@@ -141,7 +236,17 @@ def _promote_rebuilt_database(*, build_path: Path, target_path: Path, run_id: st
     build_path.replace(target_path)
 
 
-def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: WorkspaceRoots | None) -> MalfRunSummary:
+def _run_malf_build(
+    *,
+    runner_name: str,
+    timeframe: Timeframe,
+    start_symbol: str | None = None,
+    end_symbol: str | None = None,
+    symbol_limit: int | None = None,
+    resume: bool = True,
+    progress_path: Path | None = None,
+    settings: WorkspaceRoots | None,
+) -> MalfRunSummary:
     workspace = settings or default_settings()
     workspace.ensure_directories()
     target_path = {
@@ -150,11 +255,47 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
         Timeframe.MONTH: workspace.databases.malf_month,
     }[timeframe]
     run_id = f"{timeframe.value}-{uuid4().hex[:12]}"
-    active_target_path = _resolve_active_target_path(target_path=target_path, timeframe=timeframe, run_id=run_id)
+    selection = _SegmentSelection(
+        start_symbol=start_symbol if timeframe is Timeframe.DAY else None,
+        end_symbol=end_symbol if timeframe is Timeframe.DAY else None,
+        symbol_limit=symbol_limit if timeframe is Timeframe.DAY else None,
+        resume=resume if timeframe is Timeframe.DAY else True,
+        full_universe=(
+            timeframe is not Timeframe.DAY
+            or (start_symbol is None and end_symbol is None and symbol_limit is None)
+        ),
+    )
+
+    artifacts = _resolve_day_build_artifacts(target_path=target_path, run_id=run_id, selection=selection) if timeframe is Timeframe.DAY else _DayBuildArtifacts(
+        active_target_path=target_path,
+        active_build_path=None,
+        abandoned_build_artifacts=(),
+    )
+    active_target_path = artifacts.active_target_path
     initialize_malf_schema(active_target_path)
-    source = load_source_bars(workspace, timeframe) if timeframe is not Timeframe.DAY else None
-    if source is not None:
+
+    source = None
+    source_path: str | None = None
+    source_items = ()
+    symbols_total = 0
+    if timeframe is Timeframe.DAY:
+        streamed_source = stream_source_bars(
+            workspace,
+            timeframe,
+            start_symbol=selection.start_symbol,
+            end_symbol=selection.end_symbol,
+            symbol_limit=selection.symbol_limit,
+        )
+        source_path = str(streamed_source.source_path) if streamed_source.source_path is not None else None
+        source_items = streamed_source.rows_by_symbol
+        symbols_total = len(streamed_source.selected_symbols)
+    else:
+        source = load_source_bars(workspace, timeframe)
         source.validate_for_timeframe(timeframe)
+        source_path = str(source.source_path) if source.source_path is not None else None
+        source_items = source.bars_by_symbol.items()
+        symbols_total = len(source.bars_by_symbol)
+
     message = "MALF run completed."
     counts = {
         "pivot_rows": 0,
@@ -163,18 +304,23 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
         "wave_scale_snapshot_rows": 0,
         "wave_scale_profile_rows": 0,
     }
-    symbols_updated = 0
-    latest_bar_dt: datetime | None = None
-    source_path = str(source.source_path) if source is not None and source.source_path is not None else None
-    symbols_seen = 0
-    input_rows = 0
-    source_items = source.bars_by_symbol.items() if source is not None else ()
+    progress_state = _RunProgressState(
+        progress_path=_resolve_progress_path(
+            workspace=workspace,
+            runner_name=runner_name,
+            run_id=run_id,
+            timeframe=timeframe,
+            requested_path=progress_path,
+        ),
+        symbols_total=symbols_total,
+        materialization_counts=counts,
+    )
     write_timing = _WriteTimingAccumulator()
+    latest_bar_dt: datetime | None = None
+    input_rows = 0
+    symbols_updated = 0
     pending_writes: list[_SymbolBuildResult] = []
-    if timeframe is Timeframe.DAY:
-        streamed_source = stream_source_bars(workspace, timeframe)
-        source_path = str(streamed_source.source_path) if streamed_source.source_path is not None else None
-        source_items = streamed_source.rows_by_symbol
+    selected_symbol_latest_bar_dts: dict[str, datetime] = {}
 
     with duckdb.connect(str(active_target_path)) as connection:
         _time_write_phase(
@@ -186,17 +332,26 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
                 timeframe=timeframe,
                 source_path=source_path,
                 input_rows=input_rows,
-                symbols_seen=symbols_seen,
+                symbols_total=symbols_total,
             ),
         )
-        _time_write_phase(
-            write_timing,
-            "queue_update_seconds",
-            lambda: connection.execute("DELETE FROM malf_work_queue WHERE timeframe = ?", [timeframe.value]),
+        _persist_progress(
+            connection=connection,
+            run_id=run_id,
+            input_rows=input_rows,
+            latest_bar_dt=latest_bar_dt,
+            message="MALF run started.",
+            status="running",
+            symbols_updated=symbols_updated,
+            counts=counts,
+            progress_state=progress_state,
         )
+
         for symbol, bars in source_items:
             input_rows += len(bars)
-            symbols_seen += 1
+            progress_state.symbols_seen += 1
+            progress_state.current_symbol = symbol
+            selected_symbol_latest_bar_dts[symbol] = bars[-1].bar_dt
             symbol_result = _execute_symbol_build(
                 connection=connection,
                 timeframe=timeframe,
@@ -204,6 +359,7 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
                 symbol=symbol,
                 bars=bars,
                 write_timing=write_timing,
+                resume=selection.resume,
             )
             latest_bar_dt = (
                 symbol_result.latest_bar_dt
@@ -216,10 +372,12 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
             counts["wave_scale_snapshot_rows"] += symbol_result.wave_scale_snapshot_rows
             counts["wave_scale_profile_rows"] += symbol_result.wave_scale_profile_rows
             symbols_updated += 1 if symbol_result.symbol_updated else 0
-            if symbol_result.symbol_updated:
+            if symbol_result.queue_status == "skipped":
+                progress_state.symbols_completed += 1
+            elif symbol_result.symbol_updated:
                 pending_writes.append(symbol_result)
             if len(pending_writes) >= _WRITE_BATCH_SYMBOL_LIMIT:
-                _flush_symbol_writes(
+                progress_state.symbols_completed += _flush_symbol_writes(
                     connection=connection,
                     timeframe=timeframe,
                     run_id=run_id,
@@ -227,60 +385,64 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
                     write_timing=write_timing,
                 )
                 pending_writes.clear()
+            _persist_progress(
+                connection=connection,
+                run_id=run_id,
+                input_rows=input_rows,
+                latest_bar_dt=latest_bar_dt,
+                message="MALF run in progress.",
+                status="running",
+                symbols_updated=symbols_updated,
+                counts=counts,
+                progress_state=progress_state,
+            )
 
-        _flush_symbol_writes(
+        progress_state.symbols_completed += _flush_symbol_writes(
             connection=connection,
             timeframe=timeframe,
             run_id=run_id,
             symbol_results=pending_writes,
             write_timing=write_timing,
         )
+        pending_writes.clear()
+        progress_state.current_symbol = None
 
-        if symbols_seen == 0:
+        promoted_to_target = False
+        if symbols_total == 0:
             message = "MALF schema initialized without source bars."
-        elif active_target_path != target_path:
-            message = "MALF run completed. Existing target was backed up before rebuild."
+        elif timeframe is Timeframe.DAY and not selection.full_universe:
+            message = "MALF day segmented build completed without target promotion."
+        elif (
+            timeframe is Timeframe.DAY
+            and artifacts.active_build_path is not None
+            and selection.full_universe
+            and progress_state.symbols_completed == symbols_total
+            and _selected_symbols_checkpointed(
+                connection=connection,
+                timeframe=timeframe,
+                symbol_latest_bar_dts=selected_symbol_latest_bar_dts,
+            )
+        ):
+            promoted_to_target = True
+            message = "MALF day full-universe build completed and building database is ready for promotion."
+        elif timeframe is Timeframe.DAY and artifacts.active_build_path is not None:
+            message = "MALF day build progress was written to a building database; target promotion remains pending."
 
-        _time_write_phase(
-            write_timing,
-            "queue_update_seconds",
-            lambda: connection.execute(
-                """
-                UPDATE malf_run
-                SET
-                    input_rows = ?,
-                    symbols_seen = ?,
-                    status = ?,
-                    symbols_updated = ?,
-                    inserted_pivots = ?,
-                    inserted_waves = ?,
-                    inserted_state_snapshots = ?,
-                    inserted_wave_scale_snapshots = ?,
-                    inserted_wave_scale_profiles = ?,
-                    latest_bar_dt = ?,
-                    message = ?,
-                    finished_at = CURRENT_TIMESTAMP
-                WHERE run_id = ?
-                """,
-                [
-                    input_rows,
-                    symbols_seen,
-                    RunStatus.COMPLETED.value,
-                    symbols_updated,
-                    counts["pivot_rows"],
-                    counts["wave_rows"],
-                    counts["state_snapshot_rows"],
-                    counts["wave_scale_snapshot_rows"],
-                    counts["wave_scale_profile_rows"],
-                    latest_bar_dt,
-                    message,
-                    run_id,
-                ],
-            ),
+        _persist_progress(
+            connection=connection,
+            run_id=run_id,
+            input_rows=input_rows,
+            latest_bar_dt=latest_bar_dt,
+            message=message,
+            status=RunStatus.COMPLETED.value,
+            symbols_updated=symbols_updated,
+            counts=counts,
+            progress_state=progress_state,
+            finished=True,
         )
 
-    if active_target_path != target_path:
-        _promote_rebuilt_database(build_path=active_target_path, target_path=target_path, run_id=run_id)
+    if timeframe is Timeframe.DAY and promoted_to_target and artifacts.active_build_path is not None:
+        _promote_rebuilt_database(build_path=artifacts.active_build_path, target_path=target_path, run_id=run_id)
 
     return MalfRunSummary(
         runner_name=runner_name,
@@ -292,12 +454,118 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
         message=message,
         materialization_counts=counts,
         checkpoint_summary=CheckpointSummary(
-            symbols_seen=symbols_seen,
+            symbols_seen=progress_state.symbols_seen,
             symbols_updated=symbols_updated,
             latest_bar_dt=latest_bar_dt.isoformat() if latest_bar_dt is not None else None,
         ),
         write_timing_summary=write_timing.as_summary(),
+        segment_summary=selection.as_summary(),
+        progress_summary=progress_state.as_summary(),
+        artifact_summary=ArtifactSummary(
+            active_build_path=str(artifacts.active_build_path) if artifacts.active_build_path is not None else None,
+            abandoned_build_artifacts=tuple(str(path) for path in artifacts.abandoned_build_artifacts),
+            promoted_to_target=promoted_to_target,
+        ),
     )
+
+
+def _resolve_progress_path(
+    *,
+    workspace: WorkspaceRoots,
+    runner_name: str,
+    run_id: str,
+    timeframe: Timeframe,
+    requested_path: Path | None,
+) -> Path | None:
+    if requested_path is not None:
+        requested_path.parent.mkdir(parents=True, exist_ok=True)
+        return requested_path
+    if timeframe is not Timeframe.DAY:
+        return None
+    progress_file = workspace.module_report_root("malf") / f"{runner_name}-{run_id}-progress.json"
+    progress_file.parent.mkdir(parents=True, exist_ok=True)
+    return progress_file
+
+
+def _persist_progress(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    input_rows: int,
+    latest_bar_dt: datetime | None,
+    message: str,
+    status: str,
+    symbols_updated: int,
+    counts: dict[str, int],
+    progress_state: _RunProgressState,
+    finished: bool = False,
+) -> None:
+    progress_summary = progress_state.as_summary()
+    finished_sql = ", finished_at = CURRENT_TIMESTAMP" if finished else ""
+    connection.execute(
+        f"""
+        UPDATE malf_run
+        SET
+            input_rows = ?,
+            symbols_total = ?,
+            symbols_seen = ?,
+            symbols_completed = ?,
+            status = ?,
+            symbols_updated = ?,
+            inserted_pivots = ?,
+            inserted_waves = ?,
+            inserted_state_snapshots = ?,
+            inserted_wave_scale_snapshots = ?,
+            inserted_wave_scale_profiles = ?,
+            current_symbol = ?,
+            elapsed_seconds = ?,
+            estimated_remaining_symbols = ?,
+            latest_bar_dt = ?,
+            message = ?
+            {finished_sql}
+        WHERE run_id = ?
+        """,
+        [
+            input_rows,
+            progress_summary.symbols_total,
+            progress_summary.symbols_seen,
+            progress_summary.symbols_completed,
+            status,
+            symbols_updated,
+            counts["pivot_rows"],
+            counts["wave_rows"],
+            counts["state_snapshot_rows"],
+            counts["wave_scale_snapshot_rows"],
+            counts["wave_scale_profile_rows"],
+            progress_summary.current_symbol,
+            progress_summary.elapsed_seconds,
+            progress_summary.estimated_remaining_symbols,
+            latest_bar_dt,
+            message,
+            run_id,
+        ],
+    )
+    _write_progress_sidecar(run_id=run_id, message=message, status=status, summary=progress_summary)
+
+
+def _write_progress_sidecar(
+    *,
+    run_id: str,
+    message: str,
+    status: str,
+    summary: ProgressSummary,
+) -> None:
+    if summary.progress_path is None:
+        return
+    payload = {
+        "run_id": run_id,
+        "status": status,
+        "message": message,
+        **summary.as_dict(),
+    }
+    progress_path = Path(summary.progress_path)
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _insert_run_stub(
@@ -307,14 +575,25 @@ def _insert_run_stub(
     timeframe: Timeframe,
     source_path: str | None,
     input_rows: int,
-    symbols_seen: int,
+    symbols_total: int,
 ) -> None:
     connection.execute(
         """
-        INSERT INTO malf_run (run_id, timeframe, status, source_path, input_rows, symbols_seen, message)
-        VALUES (?, ?, 'running', ?, ?, ?, 'MALF run started.')
+        INSERT INTO malf_run (
+            run_id,
+            timeframe,
+            status,
+            source_path,
+            input_rows,
+            symbols_total,
+            symbols_seen,
+            symbols_completed,
+            estimated_remaining_symbols,
+            message
+        )
+        VALUES (?, ?, 'running', ?, ?, ?, 0, 0, ?, 'MALF run started.')
         """,
-        [run_id, timeframe.value, source_path, input_rows, symbols_seen],
+        [run_id, timeframe.value, source_path, input_rows, symbols_total, symbols_total],
     )
 
 
@@ -339,6 +618,7 @@ def _execute_symbol_build(
     symbol: str,
     bars: list,
     write_timing: _WriteTimingAccumulator,
+    resume: bool,
 ) -> _SymbolBuildResult:
     queue_id = f"{run_id}:{symbol}"
     latest_symbol_bar_dt = bars[-1].bar_dt
@@ -354,11 +634,13 @@ def _execute_symbol_build(
             last_bar_dt=latest_symbol_bar_dt,
         ),
     )
-    checkpoint_bar_dt = _time_write_phase(
-        write_timing,
-        "checkpoint_seconds",
-        lambda: _load_checkpoint_bar_dt(connection=connection, timeframe=timeframe, symbol=symbol),
-    )
+    checkpoint_bar_dt = None
+    if resume:
+        checkpoint_bar_dt = _time_write_phase(
+            write_timing,
+            "checkpoint_seconds",
+            lambda: _load_checkpoint_bar_dt(connection=connection, timeframe=timeframe, symbol=symbol),
+        )
     if checkpoint_bar_dt is not None and checkpoint_bar_dt >= latest_symbol_bar_dt:
         _time_write_phase(
             write_timing,
@@ -421,12 +703,12 @@ def _flush_symbol_writes(
     run_id: str,
     symbol_results: list[_SymbolBuildResult],
     write_timing: _WriteTimingAccumulator,
-) -> None:
+) -> int:
     if not symbol_results:
-        return
+        return 0
     updated_results = [item for item in symbol_results if item.symbol_updated and item.result is not None]
     if not updated_results:
-        return
+        return 0
     _time_write_phase(
         write_timing,
         "insert_ledgers_seconds",
@@ -456,30 +738,23 @@ def _flush_symbol_writes(
             status="completed",
         ),
     )
+    return len(updated_results)
 
 
-def _replace_symbol_rows(*, connection: duckdb.DuckDBPyConnection, timeframe: Timeframe, symbol: str) -> None:
-    _replace_symbol_rows_batch(connection=connection, timeframe=timeframe, symbols=[symbol])
-
-
-def _replace_symbol_rows_batch(
+def _selected_symbols_checkpointed(
     *,
     connection: duckdb.DuckDBPyConnection,
     timeframe: Timeframe,
-    symbols: list[str],
-) -> None:
-    if not symbols:
-        return
-    placeholders = ", ".join(["?"] * len(symbols))
-    params: list[object] = [timeframe.value, *symbols]
-    for table_name in (
-        "malf_pivot_ledger",
-        "malf_wave_ledger",
-        "malf_state_snapshot",
-        "malf_wave_scale_snapshot",
-        "malf_wave_scale_profile",
-    ):
-        connection.execute(f"DELETE FROM {table_name} WHERE timeframe = ? AND symbol IN ({placeholders})", params)
+    symbol_latest_bar_dts: dict[str, datetime],
+) -> bool:
+    if not symbol_latest_bar_dts:
+        return False
+    return all(
+        (checkpoint_bar_dt := _load_checkpoint_bar_dt(connection=connection, timeframe=timeframe, symbol=symbol))
+        is not None
+        and checkpoint_bar_dt >= latest_bar_dt
+        for symbol, latest_bar_dt in symbol_latest_bar_dts.items()
+    )
 
 
 def _insert_rows(
@@ -520,15 +795,6 @@ def _insert_rows(
         f"{insert_keyword} INTO {table_name} ({column_sql}) VALUES ({placeholders})",
         rows,
     )
-
-
-def _insert_result_rows(
-    *,
-    connection: duckdb.DuckDBPyConnection,
-    run_id: str,
-    result: EngineResult,
-) -> None:
-    _insert_result_rows_batch(connection=connection, run_id=run_id, results=[result])
 
 
 def _insert_result_rows_batch(
@@ -720,35 +986,6 @@ def _insert_result_rows_batch(
         ],
         rows=wave_scale_profile_rows,
         replace_existing=replace_existing,
-    )
-
-
-def _upsert_checkpoint(
-    *,
-    connection: duckdb.DuckDBPyConnection,
-    timeframe: Timeframe,
-    symbol: str,
-    run_id: str,
-    last_bar_dt: datetime,
-) -> None:
-    _upsert_checkpoints_batch(
-        connection=connection,
-        timeframe=timeframe,
-        run_id=run_id,
-        symbol_results=[
-            _SymbolBuildResult(
-                symbol=symbol,
-                queue_id="",
-                latest_bar_dt=last_bar_dt,
-                queue_status="completed",
-                pivot_rows=0,
-                wave_rows=0,
-                state_snapshot_rows=0,
-                wave_scale_snapshot_rows=0,
-                wave_scale_profile_rows=0,
-                symbol_updated=True,
-            )
-        ],
     )
 
 

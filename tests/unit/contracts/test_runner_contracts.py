@@ -56,6 +56,9 @@ def test_foundation_runner_names_are_stable(monkeypatch, tmp_path):
     assert [summary.timeframe for summary in malf_summaries] == ["day", "week", "month"]
     assert all(summary.status == "completed" for summary in malf_summaries)
     assert all("phase" not in summary.as_dict() for summary in malf_summaries)
+    assert all("segment_summary" in summary.as_dict() for summary in malf_summaries)
+    assert all("progress_summary" in summary.as_dict() for summary in malf_summaries)
+    assert all("artifact_summary" in summary.as_dict() for summary in malf_summaries)
     assert [summary.scope for summary in alpha_summaries] == [
         "bof",
         "tst",

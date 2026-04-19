@@ -95,6 +95,68 @@ class WriteTimingSummary:
 
 
 @dataclass(frozen=True)
+class SegmentSummary:
+    """Serialized segment-selection summary returned by MALF runners."""
+
+    start_symbol: str | None = None
+    end_symbol: str | None = None
+    symbol_limit: int | None = None
+    resume: bool = True
+    full_universe: bool = True
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "start_symbol": self.start_symbol,
+            "end_symbol": self.end_symbol,
+            "symbol_limit": self.symbol_limit,
+            "resume": self.resume,
+            "full_universe": self.full_universe,
+        }
+
+
+@dataclass(frozen=True)
+class ProgressSummary:
+    """Serialized progress summary returned by MALF runners."""
+
+    symbols_total: int = 0
+    symbols_seen: int = 0
+    symbols_completed: int = 0
+    current_symbol: str | None = None
+    elapsed_seconds: float = 0.0
+    estimated_remaining_symbols: int = 0
+    ledger_rows_written: dict[str, int] = field(default_factory=dict)
+    progress_path: str | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "symbols_total": self.symbols_total,
+            "symbols_seen": self.symbols_seen,
+            "symbols_completed": self.symbols_completed,
+            "current_symbol": self.current_symbol,
+            "elapsed_seconds": self.elapsed_seconds,
+            "estimated_remaining_symbols": self.estimated_remaining_symbols,
+            "ledger_rows_written": dict(self.ledger_rows_written),
+            "progress_path": self.progress_path,
+        }
+
+
+@dataclass(frozen=True)
+class ArtifactSummary:
+    """Serialized artifact summary returned by MALF runners."""
+
+    active_build_path: str | None = None
+    abandoned_build_artifacts: tuple[str, ...] = ()
+    promoted_to_target: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "active_build_path": self.active_build_path,
+            "abandoned_build_artifacts": list(self.abandoned_build_artifacts),
+            "promoted_to_target": self.promoted_to_target,
+        }
+
+
+@dataclass(frozen=True)
 class MalfRunSummary:
     """Stable stage-two MALF runner summary."""
 
@@ -110,6 +172,9 @@ class MalfRunSummary:
         default_factory=lambda: CheckpointSummary(symbols_seen=0, symbols_updated=0, latest_bar_dt=None)
     )
     write_timing_summary: WriteTimingSummary = field(default_factory=WriteTimingSummary)
+    segment_summary: SegmentSummary = field(default_factory=SegmentSummary)
+    progress_summary: ProgressSummary = field(default_factory=ProgressSummary)
+    artifact_summary: ArtifactSummary = field(default_factory=ArtifactSummary)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -123,4 +188,7 @@ class MalfRunSummary:
             "materialization_counts": dict(self.materialization_counts),
             "checkpoint_summary": self.checkpoint_summary.as_dict(),
             "write_timing_summary": self.write_timing_summary.as_dict(),
+            "segment_summary": self.segment_summary.as_dict(),
+            "progress_summary": self.progress_summary.as_dict(),
+            "artifact_summary": self.artifact_summary.as_dict(),
         }
