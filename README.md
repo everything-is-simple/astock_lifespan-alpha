@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段八 `data -> system` 最小 pipeline orchestration，并已冻结阶段九真实建库演练规格；真实建库待执行。重点是：
+当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已启动并发现阻塞；待修复。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -42,12 +42,14 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - `run_data_to_system_pipeline` 与 `pipeline_run / pipeline_step_run` 已落地
 - 阶段九规格冻结闭环 `32` 已补齐
 - 阶段九主线固定为真实 `H:\Lifespan-data` 建库演练
+- 阶段九执行收口闭环 `33` 已补齐
+- 首个 blocker 出现在 `run_malf_day_build` 真实库复跑
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九规格已冻结，真实建库待执行。
+> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九真实建库演练已启动，但在真实 MALF day 复跑处发现阻塞，当前待修复。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -105,6 +107,11 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 文档标识：`stage-nine-real-data-build`
 - 主题：真实 `H:\Lifespan-data` module-by-module build 与 pipeline replay
 - 边界：先做 read-only preflight，再做真实建库演练；`Go+DuckDB deferred`
+
+阶段九真实建库演练执行收口：
+- `docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
+- 裁决：阶段九真实建库演练发现阻塞，待修复
+- 阻塞点：`PYTHONPATH` 修正后，`run_malf_day_build` 真实库复跑超过 12 分钟未完成返回，并占用 `malf_day.duckdb`
 
 ## 文档入口
 

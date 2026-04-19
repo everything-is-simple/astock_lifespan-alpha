@@ -40,6 +40,7 @@ card -> evidence -> record -> conclusion
 20. `docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
 21. `docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
 22. `docs/03-execution/32-real-data-build-rehearsal-spec-freeze-conclusion-20260419.md`
+23. `docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -79,7 +80,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已冻结阶段九真实建库演练规格。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录，当前状态为发现阻塞。
 
 这意味着：
 
@@ -101,6 +102,8 @@ card -> evidence -> record -> conclusion
 - `run_data_to_system_pipeline` 与 `pipeline_run / pipeline_step_run` 已落地
 - 阶段九规格冻结闭环 `32` 已补齐
 - `stage-nine-real-data-build` 已冻结真实 `H:\Lifespan-data` 建库演练边界
+- 阶段九执行收口闭环 `33` 已补齐
+- `run_malf_day_build` 真实库复跑已暴露首个 blocker
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -137,5 +140,5 @@ Stage-five engineering defaults are frozen:
 阶段九真实建库演练规格：
 - 文档标识：`stage-nine-real-data-build`
 - 主题：真实 `H:\Lifespan-data` module-by-module build 与 pipeline replay
-- 裁决：阶段九规格冻结，真实建库待执行
+- 裁决：阶段九真实建库演练发现阻塞，待修复
 - 边界：允许写入 `H:\Lifespan-data\astock_lifespan_alpha`，不删除正式库，`Go+DuckDB deferred`

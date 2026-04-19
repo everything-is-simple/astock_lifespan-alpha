@@ -44,3 +44,28 @@ def test_stage_nine_real_data_build_spec_freeze_is_registered():
 
     for term in required_terms:
         assert term in combined
+
+
+def test_stage_nine_real_data_build_blocker_closeout_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root / "docs" / "03-execution" / "33-real-data-build-rehearsal-closeout-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{docs_index}\n{readme}\n{conclusion}"
+    required_terms = [
+        "`33` 阶段九真实建库演练执行收口",
+        "`docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`",
+        "阶段九真实建库演练发现阻塞，待修复",
+        "`run_malf_day_build`",
+        "`PYTHONPATH`",
+        "`malf_day.duckdb`",
+    ]
+
+    for term in required_terms:
+        assert term in combined
