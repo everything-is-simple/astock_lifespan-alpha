@@ -32,8 +32,9 @@ card -> evidence -> record -> conclusion
 12. `docs/02-spec/08-trade-minimal-execution-ledger-and-runner-spec-v1-20260419.md`
 13. `docs/02-spec/09-portfolio-plan-to-trade-bridge-spec-v1-20260419.md`
 14. `docs/02-spec/10-astock-lifespan-alpha-reconstruction-plan-part2-stage-five-trade-v1-20260419.md`
-15. `docs/03-execution/README.md`
-16. `docs/03-execution/25-stage-five-engineering-closeout-conclusion-20260419.md`
+15. `docs/02-spec/11-system-minimal-readout-and-runner-spec-v1-20260419.md`
+16. `docs/03-execution/README.md`
+17. `docs/03-execution/26-stage-six-system-readout-spec-freeze-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -73,7 +74,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段五 `portfolio_plan -> trade` 最小执行主线，并已落档重构计划 Part 2。
+当前仓库已经完成阶段五 `portfolio_plan -> trade` 最小执行主线，并已落档重构计划 Part 2。阶段六 `system` 最小读出与 runner 规格已经冻结，工程待实施。
 
 这意味着：
 
@@ -81,6 +82,8 @@ card -> evidence -> record -> conclusion
 - `position` 已具备正式规格、独立账本、queue/checkpoint、正式 runner 与三层最小输出
 - `portfolio_plan` 已具备最小三表、最小组合裁决与正式 runner
 - `trade` 已具备最小执行账本、桥接规格、正式 runner、CLI 入口与测试闭环
+- 阶段六规格冻结闭环 `26` 已补齐
+- `stage-six-system` 已冻结 `trade -> system` 最小读出边界
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -95,3 +98,9 @@ Stage-five engineering defaults are frozen:
 - 文档标识：`reconstruction-plan-part2`
 - 主题：第五阶段文档先行与工程实施计划
 - 裁决：阶段五完成，阶段六 system 待规划/待实施
+
+阶段六 system 规格：
+- 文档标识：`stage-six-system`
+- 主题：`trade -> system` 最小读出与 runner
+- 裁决：阶段六规格冻结，工程待实施
+- 边界：只读取 `trade` 正式输出，不回读 `alpha / position / portfolio_plan`，不触发上游 runner

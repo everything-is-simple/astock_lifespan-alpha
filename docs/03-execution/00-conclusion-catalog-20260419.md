@@ -158,3 +158,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/25-stage-five-engineering-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段五 `portfolio_plan -> trade` 文档冻结与工程实现均已完成；`reconstruction-plan-part2` 已正式落档，后续可以进入阶段六 `system`。
+
+### `26` 阶段六 system 读出规格冻结
+
+- 结论文件：`docs/03-execution/26-stage-six-system-readout-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段六 `stage-six-system` 已冻结，`trade -> system` 是唯一正式主线；阶段六规格冻结，工程待实施。
