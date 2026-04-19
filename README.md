@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已发现阻塞，阶段十 MALF day 真实库诊断已完成；阶段九重演待重新发起。重点是：
+当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已发现阻塞，阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已冻结；阶段九重演待在写路径工程结果落地后重新发起。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -47,13 +47,17 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - 阶段十规格冻结闭环 `34` 已补齐
 - 阶段十主线固定为 MALF day 真实库诊断与脚本入口修正
 - 阶段十工程收口闭环 `35` 已补齐
-- `profile_malf_day_real_data` 已确认当前真实瓶颈落在 `engine_timing`
+- 阶段十一规格冻结闭环 `36` 已补齐
+- 阶段十一工程收口闭环 `37` 已补齐
+- `profile_malf_day_real_data` 已确认当前真实瓶颈已从 `engine_timing` 转为 `write_timing`
+- 阶段十二规格冻结闭环 `38` 已补齐
+- 下一轮固定处理 MALF day 写路径诊断、写入优化与阶段九真实重演 unblock
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九阻塞已定位到真实 MALF day 首步，阶段十诊断已完成，阶段九重演待重新发起。
+> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九阻塞已定位到真实 MALF day 首步，阶段十二已冻结写路径 unblock 边界，阶段九重演待写路径工程结果落地后重新发起。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -146,3 +150,13 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 当前真实瓶颈已从 `engine_timing` 转到 `write_timing`
 
 阶段九真实重演尚未重新发起；下一轮关注点不再是 `snapshot_nk / pivot_nk` 主键冲突，而是全量真实 build 的写入耗时与持续时长。
+
+## 阶段十二更新
+
+阶段十二 `stage-twelve-malf-day-write-path-replay-unblock` 已冻结并正式登记：
+
+- 新规格：`docs/02-spec/17-stage-twelve-malf-day-write-path-replay-unblock-spec-v1-20260419.md`
+- 规格冻结结论：`docs/03-execution/38-stage-twelve-malf-day-write-path-replay-unblock-spec-freeze-conclusion-20260419.md`
+- `write_timing` 至少拆成 `delete old rows / insert ledgers / checkpoint / queue update`
+- 真实全量 `run_malf_day_build` 可完成性优先
+- 阶段十二不修改 MALF 语义，不处理 `guard anchor / reborn window / 历史谱系 profile`

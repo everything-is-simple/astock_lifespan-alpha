@@ -44,6 +44,9 @@ card -> evidence -> record -> conclusion
 24. `docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
 25. `docs/03-execution/34-malf-day-real-data-diagnosis-spec-freeze-conclusion-20260419.md`
 26. `docs/03-execution/35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md`
+27. `docs/02-spec/16-stage-eleven-malf-day-repair-spec-v1-20260419.md`
+28. `docs/02-spec/17-stage-twelve-malf-day-write-path-replay-unblock-spec-v1-20260419.md`
+29. `docs/03-execution/38-stage-twelve-malf-day-write-path-replay-unblock-spec-freeze-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -83,7 +86,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十 MALF day 真实库诊断已完成，当前状态为阶段九重演待重新发起。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已冻结，当前状态为写路径工程实施与阶段九重演待重新发起。
 
 这意味着：
 
@@ -111,6 +114,13 @@ card -> evidence -> record -> conclusion
 - `stage-ten-malf-day-diagnosis` 已冻结 MALF day 真实库诊断边界
 - 阶段十工程收口闭环 `35` 已补齐
 - `profile_malf_day_real_data` 已确认当前真实瓶颈落在 `engine_timing`
+- 阶段十一规格冻结闭环 `36` 已补齐
+- 阶段十一工程收口闭环 `37` 已补齐
+- `adjust_method = backward` 已 formalize 为 MALF day source contract
+- 同一真实诊断窗口下 `engine_seconds` 已从 `6.789267` 降到 `1.419344`
+- 当前真实主瓶颈已转为 `write_timing`
+- 阶段十二规格冻结闭环 `38` 已补齐
+- `stage-twelve-malf-day-write-path-replay-unblock` 已冻结写路径诊断、优化与阶段九重演 unblock 边界
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -171,3 +181,17 @@ Stage-five engineering defaults are frozen:
 - 真实诊断窗口下 `engine_timing` 已不再是主瓶颈，当前转为 `write_timing`
 
 当前正式状态为：阶段十一完成，阶段九重演待在 `write_timing` 与真实全量 build 持续时长的新瓶颈上重新发起。
+
+## 阶段十二补充
+
+- 新规格：`docs/02-spec/17-stage-twelve-malf-day-write-path-replay-unblock-spec-v1-20260419.md`
+- 规格冻结结论：`docs/03-execution/38-stage-twelve-malf-day-write-path-replay-unblock-spec-freeze-conclusion-20260419.md`
+
+阶段十二正式冻结以下口径：
+
+- 下一轮只处理 MALF day 写路径与阶段九真实重演 unblock
+- `write_timing` 至少拆成 `delete old rows / insert ledgers / checkpoint / queue update`
+- 真实全量 `run_malf_day_build` 可完成性优先于实现优雅度
+- `guard anchor / reborn window / 历史谱系 profile` 不进入阶段十二
+
+当前正式状态为：阶段十二规格冻结完成，下一批次进入写路径工程实施、真实全量 build 验证与阶段九重演发起。
