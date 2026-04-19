@@ -47,3 +47,34 @@ def test_stage_six_system_spec_freeze_conclusion_is_registered():
 
     for term in required_terms:
         assert term in combined
+
+
+def test_stage_six_system_engineering_closeout_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root
+        / "docs"
+        / "03-execution"
+        / "27-stage-six-system-readout-engineering-closeout-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{docs_index}\n{readme}\n{conclusion}"
+    required_terms = [
+        "`27` 阶段六 system 读出工程收口",
+        "`docs/03-execution/27-stage-six-system-readout-engineering-closeout-conclusion-20260419.md`",
+        "`run_system_from_trade`",
+        "`system_run / system_trade_readout / system_portfolio_trade_summary`",
+        "阶段六完成",
+        "下一阶段待规划",
+        "只读取 `trade` 正式输出",
+        "不回读 `alpha / position / portfolio_plan`",
+        "不触发上游 runner",
+    ]
+
+    for term in required_terms:
+        assert term in combined

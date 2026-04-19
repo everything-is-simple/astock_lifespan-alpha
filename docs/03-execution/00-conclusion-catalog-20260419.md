@@ -164,3 +164,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/26-stage-six-system-readout-spec-freeze-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段六 `stage-six-system` 已冻结，`trade -> system` 是唯一正式主线；阶段六规格冻结，工程待实施。
+
+### `27` 阶段六 system 读出工程收口
+
+- 结论文件：`docs/03-execution/27-stage-six-system-readout-engineering-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段六 `run_system_from_trade` 与 `system_run / system_trade_readout / system_portfolio_trade_summary` 已落地；阶段六完成，下一阶段待规划。
