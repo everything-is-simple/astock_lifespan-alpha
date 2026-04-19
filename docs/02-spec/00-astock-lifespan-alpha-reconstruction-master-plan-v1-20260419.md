@@ -412,8 +412,15 @@ guard 规则冻结为：
 
 在前期阶段里：
 
-- `trade` 暂时保留稳定接口
+- `trade` 在阶段五先冻结最小执行账本与 `portfolio_plan -> trade` 桥接规格
 - `system` 暂时保留稳定接口
+
+阶段五起额外冻结以下价格分线：
+
+- `malf / alpha` 使用 `analysis_price_line`
+- `portfolio_plan / trade / system` 使用 `execution_price_line`
+
+阶段四 `reference_trade_date / reference_price` 只是最小桥接参考，不等于阶段五之后的正式执行价格口径。
 
 在上游真值链条稳定之前，不要求深度重构。
 
@@ -483,6 +490,21 @@ guard 规则冻结为：
 - `position` 只依赖 `alpha_signal`
 - `portfolio_plan` 桥层保留
 - 新主线真值链稳定
+
+### 阶段五：Trade 文档冻结与最小执行账本实施
+
+任务：
+
+- 冻结 `trade` 最小执行账本与 runner 规格
+- 冻结 `portfolio_plan -> trade` 最小桥接规格
+- 写清 `analysis_price_line / execution_price_line` 价格分线
+- 实现 `trade` 最小正式账本、queue、checkpoint、runner 与脚本入口
+
+验收：
+
+- `trade` 只依赖 `portfolio_plan_snapshot` 与正式执行价格输入
+- `trade_run / trade_work_queue / trade_checkpoint / trade_order_intent / trade_order_execution / trade_run_order_intent` 落地
+- `accepted / rejected / filled` 最小回报稳定
 
 ## 10. 测试与验收
 

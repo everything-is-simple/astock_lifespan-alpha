@@ -129,3 +129,21 @@
 - 结论文件：`docs/03-execution/21-stage-four-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段四 `15-20` 已经完成收口，后续可以进入阶段五 `trade` 规划与实施。
+
+### `22` trade 最小执行账本与 runner 规格冻结
+
+- 结论文件：`docs/03-execution/22-trade-minimal-execution-ledger-and-runner-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段五 `trade` 最小执行账本、runner 合同与价格分线已经冻结。
+
+### `23` portfolio_plan -> trade 桥接规格冻结
+
+- 结论文件：`docs/03-execution/23-portfolio-plan-to-trade-bridge-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段五 `portfolio_plan -> trade` 的唯一正式桥接、最小输入字段与阶段四勘误已经冻结。
+
+### `24` 阶段五文档总收口
+
+- 结论文件：`docs/03-execution/24-stage-five-document-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段五 `22-23` 文档已完成收口，后续可以进入 `trade` 工程实施。

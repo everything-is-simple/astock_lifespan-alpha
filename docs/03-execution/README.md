@@ -62,3 +62,6 @@ card -> evidence -> record -> conclusion
 - `19` position 契约、Schema 与 runner
 - `20` position 物化与最小 portfolio_plan bridge
 - `21` 阶段四本地收口
+- `22` trade 最小执行账本与 runner 规格冻结
+- `23` portfolio_plan -> trade 桥接规格冻结
+- `24` 阶段五文档总收口
