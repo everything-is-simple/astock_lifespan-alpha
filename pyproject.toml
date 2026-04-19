@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astock-lifespan-alpha"
+version = "0.1.0"
+description = "Reconstructed local-first historical ledger system with MALF-led market structure truth."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "duckdb>=1.2.0",
+    "pyarrow>=18.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
+    "pandas>=2.2.0",
+    "pre-commit>=4.3.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/astock_lifespan_alpha"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--basetemp=H:/Lifespan-temp/pytest-tmp"
+cache_dir = "H:/Lifespan-temp/pytest-cache"
+

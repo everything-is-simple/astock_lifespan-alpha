@@ -1,0 +1,38 @@
+sandbox_mode = "danger-full-access"
+
+[workspace]
+repo_root = "H:/astock_lifespan-alpha"
+data_root = "H:/Lifespan-data"
+report_root = "H:/Lifespan-report"
+temp_root = "H:/Lifespan-temp"
+validated_root = "H:/Lifespan-Validated"
+new_data_namespace = "astock_lifespan_alpha"
+
+[governance]
+document_diagram_required = true
+doc_first = true
+run_id_is_audit_only = true
+stable_entity_anchor = "asset_type+code"
+formal_modules = [
+    "core",
+    "data",
+    "malf",
+    "alpha",
+    "position",
+    "portfolio_plan",
+    "trade",
+    "system",
+]
+formal_runner_scripts = [
+    "scripts/malf/run_malf_day_build.py",
+    "scripts/malf/run_malf_week_build.py",
+    "scripts/malf/run_malf_month_build.py",
+    "scripts/alpha/run_alpha_bof_build.py",
+    "scripts/alpha/run_alpha_tst_build.py",
+    "scripts/alpha/run_alpha_pb_build.py",
+    "scripts/alpha/run_alpha_cpb_build.py",
+    "scripts/alpha/run_alpha_bpb_build.py",
+    "scripts/alpha/run_alpha_signal_build.py",
+    "scripts/position/run_position_from_alpha_signal.py",
+]
+
