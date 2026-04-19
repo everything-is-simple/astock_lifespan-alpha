@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已发现阻塞，阶段十 MALF day 真实库诊断规格已冻结；诊断待实施。重点是：
+当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已发现阻塞，阶段十 MALF day 真实库诊断已完成；阶段九重演待重新发起。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -46,12 +46,14 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - 首个 blocker 出现在 `run_malf_day_build` 真实库复跑
 - 阶段十规格冻结闭环 `34` 已补齐
 - 阶段十主线固定为 MALF day 真实库诊断与脚本入口修正
+- 阶段十工程收口闭环 `35` 已补齐
+- `profile_malf_day_real_data` 已确认当前真实瓶颈落在 `engine_timing`
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九阻塞已定位到真实 MALF day 首步，阶段十规格已冻结，诊断待实施。
+> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九阻塞已定位到真实 MALF day 首步，阶段十诊断已完成，阶段九重演待重新发起。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -121,6 +123,13 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 主题：`run_malf_day_build` 真实库卡点诊断与脚本入口修正
 - 诊断表：`stock_daily_adjusted`
 - 边界：只做 `PYTHONPATH` 入口修正与真实库只读诊断，不修改 MALF 业务语义
+
+阶段十 MALF day 真实库诊断工程已完成：
+- `scripts/_bootstrap.py`
+- `scripts/malf/profile_malf_day_real_data.py`
+- 诊断结论：`engine_timing`
+- 收口结论：`docs/03-execution/35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md`
+- 下一步：阶段九重演待重新发起
 
 ## 文档入口
 

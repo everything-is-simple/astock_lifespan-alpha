@@ -46,3 +46,28 @@ def test_stage_ten_malf_day_diagnosis_spec_freeze_is_registered():
 
     for term in required_terms:
         assert term in combined
+
+
+def test_stage_ten_malf_day_diagnosis_closeout_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root / "docs" / "03-execution" / "35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{docs_index}\n{readme}\n{conclusion}"
+    required_terms = [
+        "`35` 阶段十 MALF day 真实库诊断工程收口",
+        "`docs/03-execution/35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md`",
+        "`profile_malf_day_real_data`",
+        "`engine_timing`",
+        "阶段十完成",
+        "阶段九重演待重新发起",
+    ]
+
+    for term in required_terms:
+        assert term in combined

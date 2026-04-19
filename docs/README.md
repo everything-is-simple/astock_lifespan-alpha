@@ -43,6 +43,7 @@ card -> evidence -> record -> conclusion
 23. `docs/03-execution/32-real-data-build-rehearsal-spec-freeze-conclusion-20260419.md`
 24. `docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
 25. `docs/03-execution/34-malf-day-real-data-diagnosis-spec-freeze-conclusion-20260419.md`
+26. `docs/03-execution/35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -82,7 +83,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十 MALF day 真实库诊断规格已冻结，当前状态为诊断待实施。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十 MALF day 真实库诊断已完成，当前状态为阶段九重演待重新发起。
 
 这意味着：
 
@@ -108,6 +109,8 @@ card -> evidence -> record -> conclusion
 - `run_malf_day_build` 真实库复跑已暴露首个 blocker
 - 阶段十规格冻结闭环 `34` 已补齐
 - `stage-ten-malf-day-diagnosis` 已冻结 MALF day 真实库诊断边界
+- 阶段十工程收口闭环 `35` 已补齐
+- `profile_malf_day_real_data` 已确认当前真实瓶颈落在 `engine_timing`
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -150,6 +153,7 @@ Stage-five engineering defaults are frozen:
 阶段十 MALF day 真实库诊断规格：
 - 文档标识：`stage-ten-malf-day-diagnosis`
 - 主题：`run_malf_day_build` 真实库卡点诊断与脚本入口修正
-- 裁决：阶段十规格冻结，诊断待实施
+- 裁决：阶段十完成，阶段九重演待重新发起
 - 诊断表：`stock_daily_adjusted`
 - 边界：只做 `PYTHONPATH` 入口修正与只读诊断，不修改 MALF 业务语义
+- 结果：`engine_timing` 已确认，真实采样写回同时暴露 `snapshot_nk / pivot_nk` 重复主键异常

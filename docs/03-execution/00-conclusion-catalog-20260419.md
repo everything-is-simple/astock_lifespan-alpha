@@ -212,3 +212,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/34-malf-day-real-data-diagnosis-spec-freeze-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段十 `stage-ten-malf-day-diagnosis` 已冻结，`run_malf_day_build` 真实库卡点诊断、`PYTHONPATH` 入口修正与 `source load timing / engine timing / write timing` 边界已登记；阶段十规格冻结，诊断待实施。
+
+### `35` 阶段十 MALF day 真实库诊断工程收口
+
+- 结论文件：`docs/03-execution/35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段十 `profile_malf_day_real_data` 与脚本 bootstrap 已落地；无参真实诊断报告已确认 `engine_timing` 为当前主瓶颈，阶段十完成，阶段九重演待重新发起。
