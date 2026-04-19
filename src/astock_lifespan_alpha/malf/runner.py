@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from dataclasses import dataclass
 from uuid import uuid4
 
 import duckdb
@@ -12,6 +13,19 @@ from astock_lifespan_alpha.malf.contracts import CheckpointSummary, MalfRunSumma
 from astock_lifespan_alpha.malf.engine import EngineResult, run_malf_engine
 from astock_lifespan_alpha.malf.schema import initialize_malf_schema
 from astock_lifespan_alpha.malf.source import load_source_bars
+
+
+@dataclass(frozen=True)
+class _SymbolBuildResult:
+    symbol: str
+    latest_bar_dt: datetime
+    queue_status: str
+    pivot_rows: int
+    wave_rows: int
+    state_snapshot_rows: int
+    wave_scale_snapshot_rows: int
+    wave_scale_profile_rows: int
+    symbol_updated: bool
 
 
 def run_malf_day_build(*, settings: WorkspaceRoots | None = None) -> MalfRunSummary:
@@ -60,56 +74,24 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
         )
         connection.execute("DELETE FROM malf_work_queue WHERE timeframe = ?", [timeframe.value])
         for symbol, bars in source.bars_by_symbol.items():
-            queue_id = f"{run_id}:{symbol}"
-            latest_symbol_bar_dt = bars[-1].bar_dt
-            latest_bar_dt = (
-                latest_symbol_bar_dt if latest_bar_dt is None or latest_symbol_bar_dt > latest_bar_dt else latest_bar_dt
-            )
-            connection.execute(
-                """
-                INSERT INTO malf_work_queue (
-                    queue_id, symbol, timeframe, status, source_bar_count, claimed_at, last_bar_dt
-                )
-                VALUES (?, ?, ?, 'running', ?, CURRENT_TIMESTAMP, ?)
-                """,
-                [queue_id, symbol, timeframe.value, len(bars), latest_symbol_bar_dt],
-            )
-            checkpoint_bar_dt = _load_checkpoint_bar_dt(connection=connection, timeframe=timeframe, symbol=symbol)
-            if checkpoint_bar_dt is not None and checkpoint_bar_dt >= latest_symbol_bar_dt:
-                connection.execute(
-                    """
-                    UPDATE malf_work_queue
-                    SET status = 'skipped', finished_at = CURRENT_TIMESTAMP
-                    WHERE queue_id = ?
-                    """,
-                    [queue_id],
-                )
-                continue
-
-            result = run_malf_engine(symbol=symbol, timeframe=timeframe, bars=bars)
-            _replace_symbol_rows(connection=connection, timeframe=timeframe, symbol=symbol)
-            _insert_result_rows(connection=connection, run_id=run_id, result=result)
-            _upsert_checkpoint(
+            symbol_result = _execute_symbol_build(
                 connection=connection,
                 timeframe=timeframe,
-                symbol=symbol,
                 run_id=run_id,
-                last_bar_dt=latest_symbol_bar_dt,
+                symbol=symbol,
+                bars=bars,
             )
-            connection.execute(
-                """
-                UPDATE malf_work_queue
-                SET status = 'completed', finished_at = CURRENT_TIMESTAMP
-                WHERE queue_id = ?
-                """,
-                [queue_id],
+            latest_bar_dt = (
+                symbol_result.latest_bar_dt
+                if latest_bar_dt is None or symbol_result.latest_bar_dt > latest_bar_dt
+                else latest_bar_dt
             )
-            counts["pivot_rows"] += len(result.pivots)
-            counts["wave_rows"] += len(result.waves)
-            counts["state_snapshot_rows"] += len(result.state_snapshots)
-            counts["wave_scale_snapshot_rows"] += len(result.wave_scale_snapshots)
-            counts["wave_scale_profile_rows"] += len(result.wave_scale_profiles)
-            symbols_updated += 1
+            counts["pivot_rows"] += symbol_result.pivot_rows
+            counts["wave_rows"] += symbol_result.wave_rows
+            counts["state_snapshot_rows"] += symbol_result.state_snapshot_rows
+            counts["wave_scale_snapshot_rows"] += symbol_result.wave_scale_snapshot_rows
+            counts["wave_scale_profile_rows"] += symbol_result.wave_scale_profile_rows
+            symbols_updated += 1 if symbol_result.symbol_updated else 0
 
         if not source.bars_by_symbol:
             message = "MALF schema initialized without source bars."
@@ -190,6 +172,78 @@ def _load_checkpoint_bar_dt(
         [timeframe.value, symbol],
     ).fetchone()
     return row[0] if row else None
+
+
+def _execute_symbol_build(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    timeframe: Timeframe,
+    run_id: str,
+    symbol: str,
+    bars: list,
+) -> _SymbolBuildResult:
+    queue_id = f"{run_id}:{symbol}"
+    latest_symbol_bar_dt = bars[-1].bar_dt
+    connection.execute(
+        """
+        INSERT INTO malf_work_queue (
+            queue_id, symbol, timeframe, status, source_bar_count, claimed_at, last_bar_dt
+        )
+        VALUES (?, ?, ?, 'running', ?, CURRENT_TIMESTAMP, ?)
+        """,
+        [queue_id, symbol, timeframe.value, len(bars), latest_symbol_bar_dt],
+    )
+    checkpoint_bar_dt = _load_checkpoint_bar_dt(connection=connection, timeframe=timeframe, symbol=symbol)
+    if checkpoint_bar_dt is not None and checkpoint_bar_dt >= latest_symbol_bar_dt:
+        connection.execute(
+            """
+            UPDATE malf_work_queue
+            SET status = 'skipped', finished_at = CURRENT_TIMESTAMP
+            WHERE queue_id = ?
+            """,
+            [queue_id],
+        )
+        return _SymbolBuildResult(
+            symbol=symbol,
+            latest_bar_dt=latest_symbol_bar_dt,
+            queue_status="skipped",
+            pivot_rows=0,
+            wave_rows=0,
+            state_snapshot_rows=0,
+            wave_scale_snapshot_rows=0,
+            wave_scale_profile_rows=0,
+            symbol_updated=False,
+        )
+
+    result = run_malf_engine(symbol=symbol, timeframe=timeframe, bars=bars)
+    _replace_symbol_rows(connection=connection, timeframe=timeframe, symbol=symbol)
+    _insert_result_rows(connection=connection, run_id=run_id, result=result)
+    _upsert_checkpoint(
+        connection=connection,
+        timeframe=timeframe,
+        symbol=symbol,
+        run_id=run_id,
+        last_bar_dt=latest_symbol_bar_dt,
+    )
+    connection.execute(
+        """
+        UPDATE malf_work_queue
+        SET status = 'completed', finished_at = CURRENT_TIMESTAMP
+        WHERE queue_id = ?
+        """,
+        [queue_id],
+    )
+    return _SymbolBuildResult(
+        symbol=symbol,
+        latest_bar_dt=latest_symbol_bar_dt,
+        queue_status="completed",
+        pivot_rows=len(result.pivots),
+        wave_rows=len(result.waves),
+        state_snapshot_rows=len(result.state_snapshots),
+        wave_scale_snapshot_rows=len(result.wave_scale_snapshots),
+        wave_scale_profile_rows=len(result.wave_scale_profiles),
+        symbol_updated=True,
+    )
 
 
 def _replace_symbol_rows(*, connection: duckdb.DuckDBPyConnection, timeframe: Timeframe, symbol: str) -> None:

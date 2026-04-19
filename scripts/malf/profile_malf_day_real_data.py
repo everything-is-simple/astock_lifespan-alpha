@@ -1,4 +1,4 @@
-"""CLI entrypoint for run_system_from_trade."""
+"""CLI entrypoint for MALF day real-data diagnostics."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ if str(REPO_ROOT) not in sys.path:
 from scripts._bootstrap import ensure_repo_src_on_path
 
 ensure_repo_src_on_path(__file__)
-from astock_lifespan_alpha.system import run_system_from_trade
+from astock_lifespan_alpha.malf.diagnostics import profile_malf_day_real_data
 
 
 if __name__ == "__main__":
-    print(json.dumps(run_system_from_trade().as_dict(), indent=2))
+    print(json.dumps(profile_malf_day_real_data().as_dict(), indent=2))

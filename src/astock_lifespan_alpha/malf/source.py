@@ -52,25 +52,34 @@ class SourceBars:
         return sum(len(bars) for bars in self.bars_by_symbol.values())
 
 
+@dataclass(frozen=True)
+class ResolvedSourceTable:
+    source_path: Path
+    table_name: str
+
+
 def load_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> SourceBars:
     """Load fact-layer bars for the requested timeframe."""
+    return load_source_bars_limited(settings, timeframe, symbol_limit=None)
 
-    direct_candidates = {
-        Timeframe.DAY: DAY_TABLE_CANDIDATES,
-        Timeframe.WEEK: WEEK_TABLE_CANDIDATES,
-        Timeframe.MONTH: MONTH_TABLE_CANDIDATES,
-    }[timeframe]
-    database_paths = {
-        Timeframe.DAY: (settings.source_databases.market_base, settings.source_databases.raw_market),
-        Timeframe.WEEK: (settings.source_databases.market_base_week, settings.source_databases.raw_market_week),
-        Timeframe.MONTH: (settings.source_databases.market_base_month, settings.source_databases.raw_market_month),
-    }[timeframe]
-    for database_path in database_paths:
-        if not database_path.exists():
-            continue
-        direct_rows = _load_rows_from_database(database_path, direct_candidates)
+
+def load_source_bars_limited(
+    settings: WorkspaceRoots,
+    timeframe: Timeframe,
+    *,
+    symbol_limit: int | None,
+) -> SourceBars:
+    """Load fact-layer bars with an optional symbol limit for diagnostics."""
+
+    resolved_source = resolve_source_table(settings, timeframe)
+    if resolved_source is not None:
+        direct_rows = _load_rows_from_table(
+            resolved_source.source_path,
+            resolved_source.table_name,
+            symbol_limit=symbol_limit,
+        )
         if direct_rows:
-            return SourceBars(source_path=database_path, bars_by_symbol=_group_rows_by_symbol(direct_rows))
+            return SourceBars(source_path=resolved_source.source_path, bars_by_symbol=_group_rows_by_symbol(direct_rows))
     if timeframe is not Timeframe.DAY:
         for database_path in (settings.source_databases.market_base, settings.source_databases.raw_market):
             if not database_path.exists():
@@ -82,17 +91,53 @@ def load_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> SourceBa
     return SourceBars(source_path=None, bars_by_symbol={})
 
 
-def _load_rows_from_database(database_path: Path, table_candidates: tuple[str, ...]) -> list[OhlcBar]:
+def resolve_source_table(settings: WorkspaceRoots, timeframe: Timeframe) -> ResolvedSourceTable | None:
+    table_candidates = {
+        Timeframe.DAY: DAY_TABLE_CANDIDATES,
+        Timeframe.WEEK: WEEK_TABLE_CANDIDATES,
+        Timeframe.MONTH: MONTH_TABLE_CANDIDATES,
+    }[timeframe]
+    database_paths = {
+        Timeframe.DAY: (settings.source_databases.market_base, settings.source_databases.raw_market),
+        Timeframe.WEEK: (settings.source_databases.market_base_week, settings.source_databases.raw_market_week),
+        Timeframe.MONTH: (settings.source_databases.market_base_month, settings.source_databases.raw_market_month),
+    }[timeframe]
+    for database_path in database_paths:
+        table_name = _resolve_table_name(database_path, table_candidates)
+        if table_name is not None:
+            return ResolvedSourceTable(source_path=database_path, table_name=table_name)
+    return None
+
+
+def _resolve_table_name(database_path: Path, table_candidates: tuple[str, ...]) -> str | None:
+    if not database_path.exists():
+        return None
     with duckdb.connect(str(database_path), read_only=True) as connection:
         available_tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
-        for table_name in table_candidates:
-            if table_name not in available_tables:
-                continue
-            return _query_ohlc_rows(connection, table_name)
-    return []
+    for table_name in table_candidates:
+        if table_name in available_tables:
+            return table_name
+    return None
 
 
-def _query_ohlc_rows(connection: duckdb.DuckDBPyConnection, table_name: str) -> list[OhlcBar]:
+def _load_rows_from_database(database_path: Path, table_candidates: tuple[str, ...]) -> list[OhlcBar]:
+    table_name = _resolve_table_name(database_path, table_candidates)
+    if table_name is None:
+        return []
+    return _load_rows_from_table(database_path, table_name, symbol_limit=None)
+
+
+def _load_rows_from_table(database_path: Path, table_name: str, *, symbol_limit: int | None) -> list[OhlcBar]:
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        return _query_ohlc_rows(connection, table_name, symbol_limit=symbol_limit)
+
+
+def _query_ohlc_rows(
+    connection: duckdb.DuckDBPyConnection,
+    table_name: str,
+    *,
+    symbol_limit: int | None,
+) -> list[OhlcBar]:
     column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
     column_names = {row[1] for row in column_info}
     date_column = _pick_required_column(column_names, ("bar_dt", "trade_date", "date"))
@@ -101,6 +146,20 @@ def _query_ohlc_rows(connection: duckdb.DuckDBPyConnection, table_name: str) -> 
     high_column = _pick_required_column(column_names, ("high",))
     low_column = _pick_required_column(column_names, ("low",))
     close_column = _pick_required_column(column_names, ("close",))
+    where_clause = ""
+    params: list[object] = []
+    if symbol_limit is not None:
+        selected_symbols = _select_symbol_prefix_sample(
+            connection=connection,
+            table_name=table_name,
+            symbol_column=symbol_column,
+            symbol_limit=symbol_limit,
+        )
+        if not selected_symbols:
+            return []
+        placeholders = ", ".join(["?"] * len(selected_symbols))
+        where_clause = f"WHERE {symbol_column} IN ({placeholders})"
+        params = list(selected_symbols)
     rows = connection.execute(
         f"""
         SELECT
@@ -111,8 +170,10 @@ def _query_ohlc_rows(connection: duckdb.DuckDBPyConnection, table_name: str) -> 
             CAST({low_column} AS DOUBLE) AS low,
             CAST({close_column} AS DOUBLE) AS close
         FROM {table_name}
+        {where_clause}
         ORDER BY symbol, bar_dt
-        """
+        """,
+        params,
     ).fetchall()
     return [
         OhlcBar(
@@ -125,6 +186,42 @@ def _query_ohlc_rows(connection: duckdb.DuckDBPyConnection, table_name: str) -> 
         )
         for symbol, bar_dt, open_price, high_price, low_price, close_price in rows
     ]
+
+
+def _select_symbol_prefix_sample(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    table_name: str,
+    symbol_column: str,
+    symbol_limit: int,
+) -> list[str]:
+    selected: list[str] = []
+    seen: set[str] = set()
+    offset = 0
+    batch_size = max(symbol_limit * 500, 10000)
+    max_scan_rows = max(batch_size * 10, 100000)
+
+    while len(selected) < symbol_limit and offset < max_scan_rows:
+        rows = connection.execute(
+            f"""
+            SELECT {symbol_column}
+            FROM {table_name}
+            LIMIT ? OFFSET ?
+            """,
+            [batch_size, offset],
+        ).fetchall()
+        if not rows:
+            break
+        for (symbol,) in rows:
+            symbol_value = str(symbol)
+            if symbol_value in seen:
+                continue
+            seen.add(symbol_value)
+            selected.append(symbol_value)
+            if len(selected) >= symbol_limit:
+                break
+        offset += batch_size
+    return selected
 
 
 def _pick_required_column(column_names: set[str], candidates: tuple[str, ...]) -> str:
