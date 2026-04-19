@@ -137,7 +137,7 @@ def test_stage_twelve_malf_day_write_path_engineering_closeout_is_registered():
         "`39` 阶段十二 MALF day 写路径重演 unblock 工程收口",
         "`docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`",
         "`write_timing_summary`",
-        "`write_seconds = 1.491133`",
+        "`write_seconds = 0.911749`",
         "阶段九重演尚未登记为完成",
     ]
 

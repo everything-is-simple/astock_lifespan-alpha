@@ -240,4 +240,4 @@ Stage-five implementation freeze addendum:
 
 - 结论文档：`docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`
 - 裁决：`已接收，保留剩余偏差`
-- 说明：`write_timing_summary` 与 registered relation 写入已落地；真实采样窗口 `write_seconds` 从 `66.626593` 降到 `1.491133`，但真实全量 build 35 分钟内仍未完成，阶段九重演不得登记为完成。
+- 说明：`write_timing_summary` 与 registered relation 写入已落地；安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds` 从 `66.626593` 降到 `0.911749`，但真实全量 build 60 分钟内仍未完成，阶段九重演不得登记为完成。

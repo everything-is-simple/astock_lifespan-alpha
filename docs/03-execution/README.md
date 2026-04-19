@@ -122,5 +122,5 @@ Stage-five implementation defaults are frozen for engineering:
 
 - `39` 阶段十二 MALF day 写路径重演 unblock 工程收口
 - `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
-- 优化后真实采样窗口 `write_seconds = 1.491133`
-- 当前剩余偏差：真实全量 build 在 35 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
+- 安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds = 0.911749`
+- 当前剩余偏差：真实全量 build 在 60 分钟观察窗内仍未完成，阶段九重演尚未登记为完成

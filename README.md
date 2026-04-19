@@ -54,8 +54,8 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - 下一轮固定处理 MALF day 写路径诊断、写入优化与阶段九真实重演 unblock
 - 阶段十二工程收口闭环 `39` 已补齐
 - `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
-- 真实采样窗口 `write_seconds` 已降到 `1.491133`
-- 真实全量 `run_malf_day_build` 在 35 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
+- 安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds` 已降到 `0.911749`
+- 真实全量 `run_malf_day_build` 在 60 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
@@ -168,6 +168,6 @@ Stage-five implementation defaults are now frozen before engineering work:
 阶段十二工程已完成首轮写路径修复：
 
 - `write_timing_summary` 输出 `delete_old_rows_seconds / insert_ledgers_seconds / checkpoint_seconds / queue_update_seconds`
-- diagnostics 优化后真实采样窗口 `write_seconds = 1.491133`
+- 安装 `pyarrow 23.0.1` 后 diagnostics 真实采样窗口 `write_seconds = 0.911749`
 - runner 已避免旧库 index delete fatal，并在旧库遗留 `running` 状态时走 building 库重建
-- 剩余偏差：真实全量 build 仍超过 35 分钟观察窗，阶段九真实重演尚未完成
+- 剩余偏差：真实全量 build 仍超过 60 分钟观察窗，阶段九真实重演尚未完成

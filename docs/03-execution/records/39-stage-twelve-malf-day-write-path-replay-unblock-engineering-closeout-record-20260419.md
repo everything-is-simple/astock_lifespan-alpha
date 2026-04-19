@@ -18,10 +18,15 @@
   - `insert_ledgers_seconds = 1.329266`
   - `checkpoint_seconds = 0.066266`
   - `queue_update_seconds = 0.066398`
+- 安装 `pyarrow 23.0.1` 后真实诊断窗口：
+  - `write_seconds = 0.911749`
+  - `insert_ledgers_seconds = 0.755103`
+  - `checkpoint_seconds = 0.05889`
+  - `queue_update_seconds = 0.066466`
 
 ## 3. 剩余偏差
 
-- 真实全量 build 仍超过 35 分钟观察窗
+- 真实全量 build 仍超过 60 分钟观察窗
 - building 库持续增长，说明进程在推进而非卡死
 - 阶段九真实重演尚未重新打通，不能登记为完成
-- 下一轮应在更长执行窗口下验证完成性，或进一步设计分段落库与更粗粒度 materialization
+- 下一轮应在超过 60 分钟的更长执行窗口下验证完成性，或进一步设计分段落库与更粗粒度 materialization

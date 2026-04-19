@@ -124,8 +124,8 @@ card -> evidence -> record -> conclusion
 - `stage-twelve-malf-day-write-path-replay-unblock` 已冻结写路径诊断、优化与阶段九重演 unblock 边界
 - 阶段十二工程收口闭环 `39` 已补齐
 - `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
-- 优化后真实采样窗口 `write_seconds = 1.491133`
-- 真实全量 build 在 35 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
+- 安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds = 0.911749`
+- 真实全量 build 在 60 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`

@@ -22,6 +22,8 @@
 - 优化后 JSON：`H:\Lifespan-report\astock_lifespan_alpha\malf\malf-day-diag-996a9a2aa5e1.json`
 - 优化后 Markdown：`H:\Lifespan-report\astock_lifespan_alpha\malf\malf-day-diag-996a9a2aa5e1.md`
 - 对照中间报告：`H:\Lifespan-report\astock_lifespan_alpha\malf\malf-day-diag-6c4ea75966cb.json`
+- PyArrow 后 JSON：`H:\Lifespan-report\astock_lifespan_alpha\malf\malf-day-diag-60cb27b8ff52.json`
+- PyArrow 后 Markdown：`H:\Lifespan-report\astock_lifespan_alpha\malf\malf-day-diag-60cb27b8ff52.md`
 
 ## 4. 真实 build 观察
 
@@ -29,3 +31,6 @@
 - 第二次全量 build 进入新 building 库：`H:\Lifespan-data\astock_lifespan_alpha\malf\malf_day.day-d696fdcd4774.building.duckdb`
 - 35 分钟观察窗结束时 building 库约 `3.14GB`
 - 后台进程被手动终止，正式 `malf_day.duckdb` 未被替换
+- 安装 `pyarrow 23.0.1` 后第三次全量 build 进入新 building 库：`H:\Lifespan-data\astock_lifespan_alpha\malf\malf_day.day-d48ab7015ff4.building.duckdb`
+- 60 分钟观察窗结束时 building 库约 `5.22GB`
+- 受控进程被手动终止，正式 `malf_day.duckdb` 仍未被替换
