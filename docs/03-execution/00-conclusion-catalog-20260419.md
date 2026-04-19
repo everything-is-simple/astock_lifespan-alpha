@@ -182,3 +182,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/29-data-source-fact-contract-alignment-engineering-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段七 data 源事实契约对齐工程已完成，`malf / alpha / position / trade` source adapter 已支持真实 stock adjusted 表；阶段八 `data -> system` 编排待规划。
+
+### `30` 阶段八 data -> system pipeline 编排规格冻结
+
+- 结论文件：`docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段八 `stage-eight-pipeline` 已冻结，`data -> system` 最小 pipeline 编排边界、固定 runner 顺序和不直接写业务表规则已登记；阶段八规格冻结，工程待实施。

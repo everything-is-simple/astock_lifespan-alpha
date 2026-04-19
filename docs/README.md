@@ -34,9 +34,9 @@ card -> evidence -> record -> conclusion
 14. `docs/02-spec/10-astock-lifespan-alpha-reconstruction-plan-part2-stage-five-trade-v1-20260419.md`
 15. `docs/02-spec/11-system-minimal-readout-and-runner-spec-v1-20260419.md`
 16. `docs/02-spec/12-data-source-fact-contract-alignment-spec-v1-20260419.md`
-17. `docs/03-execution/README.md`
-18. `docs/03-execution/28-data-source-fact-contract-alignment-spec-freeze-conclusion-20260419.md`
-19. `docs/03-execution/29-data-source-fact-contract-alignment-engineering-closeout-conclusion-20260419.md`
+17. `docs/02-spec/13-data-to-system-minimal-pipeline-orchestration-spec-v1-20260419.md`
+18. `docs/03-execution/README.md`
+19. `docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -76,7 +76,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段七 data 源事实契约对齐，阶段八 `data -> system` 最小全链路编排待规划。
+当前仓库已经完成阶段七 data 源事实契约对齐，并已冻结阶段八 `data -> system` 最小 pipeline 编排规格。
 
 这意味着：
 
@@ -92,6 +92,8 @@ card -> evidence -> record -> conclusion
 - `stage-seven-data-source-contract` 已冻结真实本地 stock source fact 路径、表名与字段映射
 - 阶段七工程收口闭环 `29` 已补齐
 - `malf / alpha / position / trade` source adapter 已支持真实 stock adjusted 表
+- 阶段八规格冻结闭环 `30` 已补齐
+- `stage-eight-pipeline` 已冻结 `data -> system` 最小 pipeline 编排边界
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -118,3 +120,9 @@ Stage-five engineering defaults are frozen:
 - 主题：6 个本地 source fact DuckDB、stock 表名和 `code -> symbol` / `trade_date -> bar_dt` 字段映射
 - 裁决：阶段七完成，阶段八待规划
 - 下一阶段入口：阶段八 `data -> system` 最小全链路编排
+
+阶段八 pipeline 规格：
+- 文档标识：`stage-eight-pipeline`
+- 主题：`data -> system` 最小 pipeline orchestration
+- 裁决：阶段八规格冻结，工程待实施
+- 边界：pipeline 只调用 public runner，不直接写业务表
