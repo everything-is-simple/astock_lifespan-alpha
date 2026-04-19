@@ -51,6 +51,8 @@ card -> evidence -> record -> conclusion
 31. `docs/02-spec/18-stage-thirteen-malf-day-segmented-build-completion-spec-v1-20260419.md`
 32. `docs/03-execution/40-stage-thirteen-malf-day-segmented-build-completion-spec-freeze-conclusion-20260419.md`
 33. `docs/03-execution/41-stage-thirteen-malf-day-segmented-build-completion-engineering-closeout-conclusion-20260419.md`
+34. `docs/02-spec/19-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-spec-v1-20260419.md`
+35. `docs/03-execution/42-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -90,7 +92,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已完成，阶段十三 MALF day segmented build completion 已完成首轮工程落地，当前状态为真实分段完成性验证与阶段九重演待重新发起。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已完成，阶段十三 MALF day segmented build completion 已完成首轮工程落地。阶段十四已启动真实分段完成性验证，但首轮 frontier proof 阻塞于真实库 schema backfill 兼容性，阶段九重演仍待重新发起。
 
 这意味着：
 
@@ -133,7 +135,10 @@ card -> evidence -> record -> conclusion
 - 阶段十三工程收口闭环 `41` 已补齐
 - `run_malf_day_build` 已支持 `segmented build`、`resume`、`progress` 与 `abandoned build artifacts`
 - 真实 build 推进顺序已固定为 `100 / 500 / 1000 symbol` 分段证明，再进入 full-universe segmented build
-- 阶段九 replay 待阶段十三完成后重新发起
+- 阶段十四规格与执行闭环 `42` 已补齐
+- 首轮真实 `100 symbol` frontier proof 失败于 `initialize_malf_schema` 对现有真实库的 schema 补齐
+- 本轮未生成新的 summary / progress sidecar，`500 / 1000 / full-universe / replay` 均未启动
+- 阶段九 replay 继续保持待重发状态
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`

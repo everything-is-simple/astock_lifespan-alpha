@@ -253,3 +253,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/41-stage-thirteen-malf-day-segmented-build-completion-engineering-closeout-conclusion-20260419.md`
 - 裁决：`已接收`
 - 说明：`run_malf_day_build` 已具备 `segment_summary / progress_summary / artifact_summary`、checkpoint-based resume、sidecar progress 与 `abandoned build artifacts` 登记；真实推进顺序固定为 `100 / 500 / 1000 symbol` 分段证明后再进入全量 segmented build，阶段九 replay 待阶段十三完成后重新发起。
+
+### `42` 阶段十四 MALF day 真实分段证明与阶段九重发
+
+- 结论文档：`docs/03-execution/42-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-conclusion-20260419.md`
+- 裁决：`已记录阻塞`
+- 说明：阶段十四 preflight 已确认真实 source、frontier 与 active/abandoned artifacts；但首轮 `python scripts/malf/run_malf_day_build.py --start-symbol 600771.SH --symbol-limit 100` 在 `initialize_malf_schema` 对现有真实库补列时失败于 `Parser Error: Adding columns with constraints not yet supported`，因此 `500 / 1000 / full-universe / replay` 均未启动。

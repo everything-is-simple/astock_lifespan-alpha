@@ -82,6 +82,7 @@ card -> evidence -> record -> conclusion
 - `39` 阶段十二 MALF day 写路径重演 unblock 工程收口
 - `40` 阶段十三 MALF day segmented build completion 规格冻结
 - `41` 阶段十三 MALF day segmented build completion 工程收口
+- `42` 阶段十四 MALF day 真实分段证明与阶段九重发
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -103,7 +104,8 @@ Stage-five implementation defaults are frozen for engineering:
 - `stage-ten-malf-day-diagnosis` 已冻结。
 - 阶段十完成。
 - 阶段十三 segmented build completion 已冻结并完成首轮工程落地。
-- 阶段九 replay 待阶段十三完成后重新发起。
+- 阶段十四真实分段证明已启动，但首轮 frontier proof 阻塞于真实库 schema backfill 兼容性。
+- 阶段九 replay 继续保持待重发状态。
 ## 阶段十一补充
 
 - `36` 阶段十一 MALF day repair 规格冻结
@@ -137,3 +139,17 @@ Stage-five implementation defaults are frozen for engineering:
 - `segment_summary / progress_summary / artifact_summary` 已进入正式 runner 合同
 - 真实推进顺序固定为 `100 / 500 / 1000 symbol` 分段证明，再进入 full-universe segmented build
 - 阶段九 replay 待阶段十三完成后重新发起
+
+## 阶段十四补充
+
+- `42` 阶段十四 MALF day 真实分段证明与阶段九重发
+- `stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart` 已冻结真实执行顺序与 blocker 兜底口径
+- 真实 preflight 已确认：
+  - day source 为 `H:\Lifespan-data\base\market_base.duckdb::stock_daily_adjusted`
+  - symbol 总量为 `5501`
+  - active frontier 为 `600771.SH`
+  - active continuation artifact 为 `malf_day.day-d48ab7015ff4.building.duckdb`
+  - abandoned artifact 为 `malf_day.day-d696fdcd4774.building.duckdb`
+- 首轮命令 `python scripts/malf/run_malf_day_build.py --start-symbol 600771.SH --symbol-limit 100` 失败于 `initialize_malf_schema`
+- 当前精确 blocker 为：DuckDB 不支持在现有真实 `malf_run` 表上用带约束定义直接 `ADD COLUMN`
+- 本轮未生成新的 summary / progress sidecar；`500 / 1000 / full-universe / replay` 均未启动
