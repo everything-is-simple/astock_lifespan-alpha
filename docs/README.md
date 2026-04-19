@@ -36,6 +36,7 @@ card -> evidence -> record -> conclusion
 16. `docs/02-spec/12-data-source-fact-contract-alignment-spec-v1-20260419.md`
 17. `docs/03-execution/README.md`
 18. `docs/03-execution/28-data-source-fact-contract-alignment-spec-freeze-conclusion-20260419.md`
+19. `docs/03-execution/29-data-source-fact-contract-alignment-engineering-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -75,7 +76,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段六 `trade -> system` 最小读出与 runner，并已冻结阶段七 data 源事实契约。
+当前仓库已经完成阶段七 data 源事实契约对齐，阶段八 `data -> system` 最小全链路编排待规划。
 
 这意味着：
 
@@ -89,6 +90,8 @@ card -> evidence -> record -> conclusion
 - `run_system_from_trade` 与 `system_run / system_trade_readout / system_portfolio_trade_summary` 已落地
 - 阶段七规格冻结闭环 `28` 已补齐
 - `stage-seven-data-source-contract` 已冻结真实本地 stock source fact 路径、表名与字段映射
+- 阶段七工程收口闭环 `29` 已补齐
+- `malf / alpha / position / trade` source adapter 已支持真实 stock adjusted 表
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -113,5 +116,5 @@ Stage-five engineering defaults are frozen:
 阶段七 data 源事实契约：
 - 文档标识：`stage-seven-data-source-contract`
 - 主题：6 个本地 source fact DuckDB、stock 表名和 `code -> symbol` / `trade_date -> bar_dt` 字段映射
-- 裁决：阶段七规格冻结，工程待实施
+- 裁决：阶段七完成，阶段八待规划
 - 下一阶段入口：阶段八 `data -> system` 最小全链路编排

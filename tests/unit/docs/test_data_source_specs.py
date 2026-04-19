@@ -51,3 +51,32 @@ def test_stage_seven_data_source_contract_spec_freeze_is_registered():
     for term in required_terms:
         assert term in combined
 
+
+def test_stage_seven_data_source_contract_engineering_closeout_is_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    conclusion = (
+        repo_root
+        / "docs"
+        / "03-execution"
+        / "29-data-source-fact-contract-alignment-engineering-closeout-conclusion-20260419.md"
+    ).read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{docs_index}\n{readme}\n{conclusion}"
+    required_terms = [
+        "`29` 阶段七 data 源事实契约工程收口",
+        "`docs/03-execution/29-data-source-fact-contract-alignment-engineering-closeout-conclusion-20260419.md`",
+        "阶段七完成",
+        "阶段八 `data -> system`",
+        "`SourceFactDatabasePaths`",
+        "`stock_daily_adjusted / stock_weekly_adjusted / stock_monthly_adjusted`",
+        "`code -> symbol`",
+        "`trade_date -> bar_dt / signal_date / execution_trade_date`",
+    ]
+
+    for term in required_terms:
+        assert term in combined

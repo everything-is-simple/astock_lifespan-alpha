@@ -176,3 +176,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/28-data-source-fact-contract-alignment-spec-freeze-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段七 `stage-seven-data-source-contract` 已冻结，真实本地 stock source fact 路径、表名与字段映射已登记；阶段七规格冻结，工程待实施，后续阶段八 `data -> system` 编排待规划。
+
+### `29` 阶段七 data 源事实契约工程收口
+
+- 结论文件：`docs/03-execution/29-data-source-fact-contract-alignment-engineering-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段七 data 源事实契约对齐工程已完成，`malf / alpha / position / trade` source adapter 已支持真实 stock adjusted 表；阶段八 `data -> system` 编排待规划。
