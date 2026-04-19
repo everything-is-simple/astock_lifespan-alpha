@@ -218,3 +218,14 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/35-malf-day-real-data-diagnosis-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段十 `profile_malf_day_real_data` 与脚本 bootstrap 已落地；无参真实诊断报告已确认 `engine_timing` 为当前主瓶颈，阶段十完成，阶段九重演待重新发起。
+### `36` 阶段十一 MALF day repair 规格冻结
+
+- 结论文档：`docs/03-execution/36-stage-eleven-malf-day-repair-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接收`
+- 说明：`stage-eleven-malf-day-repair` 已冻结；`stock_daily_adjusted` 的 MALF day source contract 固定为 `adjust_method = backward`，重复 `symbol + trade_date` 必须 fail-fast。
+
+### `37` 阶段十一 MALF day repair 工程收口
+
+- 结论文档：`docs/03-execution/37-stage-eleven-malf-day-repair-engineering-closeout-conclusion-20260419.md`
+- 裁决：`已接收`
+- 说明：阶段十一工程实现已完成；同一真实诊断窗口下 `engine_seconds` 已从 `6.789267` 降到 `1.419344`，当前主瓶颈转为 `write_timing`，阶段九重演待在新瓶颈上重新发起。

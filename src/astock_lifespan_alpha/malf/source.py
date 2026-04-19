@@ -14,6 +14,7 @@ from astock_lifespan_alpha.core.paths import WorkspaceRoots
 from astock_lifespan_alpha.malf.contracts import OhlcBar, Timeframe
 
 
+DAY_ADJUST_METHOD = "backward"
 DAY_TABLE_CANDIDATES = (
     "stock_daily_adjusted",
     "market_base_day",
@@ -46,10 +47,24 @@ class SourceBars:
 
     source_path: Path | None
     bars_by_symbol: dict[str, list[OhlcBar]]
+    selected_adjust_method: str | None = None
+    duplicate_symbol_trade_date_groups: int = 0
+    duplicate_symbol_trade_date_examples: tuple[str, ...] = ()
 
     @property
     def row_count(self) -> int:
         return sum(len(bars) for bars in self.bars_by_symbol.values())
+
+    def validate_for_timeframe(self, timeframe: Timeframe) -> None:
+        if timeframe is not Timeframe.DAY or self.duplicate_symbol_trade_date_groups == 0:
+            return
+        examples = ", ".join(self.duplicate_symbol_trade_date_examples) if self.duplicate_symbol_trade_date_examples else "-"
+        adjust_method = self.selected_adjust_method or "unfiltered"
+        raise SourceContractViolationError(
+            "MALF day source contract violated after formalization: "
+            f"adjust_method={adjust_method}, duplicate_symbol_trade_date_groups={self.duplicate_symbol_trade_date_groups}, "
+            f"examples={examples}"
+        )
 
 
 @dataclass(frozen=True)
@@ -58,9 +73,44 @@ class ResolvedSourceTable:
     table_name: str
 
 
+@dataclass(frozen=True)
+class LoadedRowsResult:
+    rows: list[OhlcBar]
+    selected_adjust_method: str | None = None
+
+
+@dataclass(frozen=True)
+class StreamedRowsResult:
+    source_path: Path | None
+    rows_by_symbol: Iterable[tuple[str, list[OhlcBar]]]
+    selected_adjust_method: str | None = None
+
+
+class SourceContractViolationError(ValueError):
+    """Raised when the loaded source bars violate the formal MALF source contract."""
+
+
 def load_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> SourceBars:
     """Load fact-layer bars for the requested timeframe."""
     return load_source_bars_limited(settings, timeframe, symbol_limit=None)
+
+
+def stream_source_bars(settings: WorkspaceRoots, timeframe: Timeframe) -> StreamedRowsResult:
+    """Stream fact-layer bars grouped by symbol for memory-bounded runner execution."""
+
+    resolved_source = resolve_source_table(settings, timeframe)
+    if resolved_source is not None:
+        return _stream_rows_from_table(
+            resolved_source.source_path,
+            resolved_source.table_name,
+            timeframe=timeframe,
+        )
+    loaded_source = load_source_bars(settings, timeframe)
+    return StreamedRowsResult(
+        source_path=loaded_source.source_path,
+        rows_by_symbol=loaded_source.bars_by_symbol.items(),
+        selected_adjust_method=loaded_source.selected_adjust_method,
+    )
 
 
 def load_source_bars_limited(
@@ -76,10 +126,21 @@ def load_source_bars_limited(
         direct_rows = _load_rows_from_table(
             resolved_source.source_path,
             resolved_source.table_name,
+            timeframe=timeframe,
             symbol_limit=symbol_limit,
         )
-        if direct_rows:
-            return SourceBars(source_path=resolved_source.source_path, bars_by_symbol=_group_rows_by_symbol(direct_rows))
+        if direct_rows.rows:
+            duplicate_group_count = 0
+            duplicate_examples: tuple[str, ...] = ()
+            if timeframe is Timeframe.DAY:
+                duplicate_group_count, duplicate_examples = _summarize_loaded_duplicates(direct_rows.rows)
+            return SourceBars(
+                source_path=resolved_source.source_path,
+                bars_by_symbol=_group_rows_by_symbol(direct_rows.rows),
+                selected_adjust_method=direct_rows.selected_adjust_method,
+                duplicate_symbol_trade_date_groups=duplicate_group_count,
+                duplicate_symbol_trade_date_examples=duplicate_examples,
+            )
     if timeframe is not Timeframe.DAY:
         for database_path in (settings.source_databases.market_base, settings.source_databases.raw_market):
             if not database_path.exists():
@@ -124,20 +185,112 @@ def _load_rows_from_database(database_path: Path, table_candidates: tuple[str, .
     table_name = _resolve_table_name(database_path, table_candidates)
     if table_name is None:
         return []
-    return _load_rows_from_table(database_path, table_name, symbol_limit=None)
+    return _load_rows_from_table(
+        database_path,
+        table_name,
+        timeframe=Timeframe.DAY,
+        symbol_limit=None,
+    ).rows
 
 
-def _load_rows_from_table(database_path: Path, table_name: str, *, symbol_limit: int | None) -> list[OhlcBar]:
+def _load_rows_from_table(
+    database_path: Path,
+    table_name: str,
+    *,
+    timeframe: Timeframe,
+    symbol_limit: int | None,
+) -> LoadedRowsResult:
     with duckdb.connect(str(database_path), read_only=True) as connection:
-        return _query_ohlc_rows(connection, table_name, symbol_limit=symbol_limit)
+        return _query_ohlc_rows(connection, table_name, timeframe=timeframe, symbol_limit=symbol_limit)
+
+
+def _stream_rows_from_table(
+    database_path: Path,
+    table_name: str,
+    *,
+    timeframe: Timeframe,
+) -> StreamedRowsResult:
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    column_names = {row[1] for row in column_info}
+    selected_adjust_method = DAY_ADJUST_METHOD if timeframe is Timeframe.DAY and "adjust_method" in column_names else None
+
+    def _generator() -> Iterable[tuple[str, list[OhlcBar]]]:
+        with duckdb.connect(str(database_path), read_only=True) as connection:
+            column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+            column_names = {row[1] for row in column_info}
+            date_column = _pick_required_column(column_names, ("bar_dt", "trade_date", "date"))
+            symbol_column = _pick_required_column(column_names, ("symbol", "code"))
+            open_column = _pick_required_column(column_names, ("open",))
+            high_column = _pick_required_column(column_names, ("high",))
+            low_column = _pick_required_column(column_names, ("low",))
+            close_column = _pick_required_column(column_names, ("close",))
+            where_clause = ""
+            params: list[object] = []
+            if timeframe is Timeframe.DAY and "adjust_method" in column_names:
+                where_clause = "WHERE adjust_method = ?"
+                params = [DAY_ADJUST_METHOD]
+            symbols = [
+                str(row[0])
+                for row in connection.execute(
+                    f"""
+                    SELECT DISTINCT {symbol_column}
+                    FROM {table_name}
+                    {where_clause}
+                    ORDER BY 1
+                    """,
+                    params,
+                ).fetchall()
+            ]
+            for symbol in symbols:
+                symbol_where_clause = f"{where_clause} {'AND' if where_clause else 'WHERE'} {symbol_column} = ?"
+                symbol_rows = connection.execute(
+                    f"""
+                    SELECT
+                        CAST({date_column} AS TIMESTAMP) AS bar_dt,
+                        CAST({open_column} AS DOUBLE) AS open,
+                        CAST({high_column} AS DOUBLE) AS high,
+                        CAST({low_column} AS DOUBLE) AS low,
+                        CAST({close_column} AS DOUBLE) AS close
+                    FROM {table_name}
+                    {symbol_where_clause}
+                    ORDER BY bar_dt
+                    """,
+                    [*params, symbol],
+                ).fetchall()
+                current_rows = [
+                    OhlcBar(
+                        symbol=symbol,
+                        bar_dt=_as_datetime(bar_dt),
+                        open=float(open_price),
+                        high=float(high_price),
+                        low=float(low_price),
+                        close=float(close_price),
+                    )
+                    for bar_dt, open_price, high_price, low_price, close_price in symbol_rows
+                ]
+                _validate_streamed_symbol_rows(
+                    symbol=symbol,
+                    rows=current_rows,
+                    timeframe=timeframe,
+                    selected_adjust_method=selected_adjust_method,
+                )
+                yield symbol, current_rows
+
+    return StreamedRowsResult(
+        source_path=database_path,
+        rows_by_symbol=_generator(),
+        selected_adjust_method=selected_adjust_method,
+    )
 
 
 def _query_ohlc_rows(
     connection: duckdb.DuckDBPyConnection,
     table_name: str,
     *,
+    timeframe: Timeframe,
     symbol_limit: int | None,
-) -> list[OhlcBar]:
+) -> LoadedRowsResult:
     column_info = connection.execute(f"PRAGMA table_info('{table_name}')").fetchall()
     column_names = {row[1] for row in column_info}
     date_column = _pick_required_column(column_names, ("bar_dt", "trade_date", "date"))
@@ -146,8 +299,13 @@ def _query_ohlc_rows(
     high_column = _pick_required_column(column_names, ("high",))
     low_column = _pick_required_column(column_names, ("low",))
     close_column = _pick_required_column(column_names, ("close",))
-    where_clause = ""
+    where_parts: list[str] = []
     params: list[object] = []
+    selected_adjust_method: str | None = None
+    if timeframe is Timeframe.DAY and "adjust_method" in column_names:
+        where_parts.append("adjust_method = ?")
+        params.append(DAY_ADJUST_METHOD)
+        selected_adjust_method = DAY_ADJUST_METHOD
     if symbol_limit is not None:
         selected_symbols = _select_symbol_prefix_sample(
             connection=connection,
@@ -156,10 +314,11 @@ def _query_ohlc_rows(
             symbol_limit=symbol_limit,
         )
         if not selected_symbols:
-            return []
+            return LoadedRowsResult(rows=[], selected_adjust_method=selected_adjust_method)
         placeholders = ", ".join(["?"] * len(selected_symbols))
-        where_clause = f"WHERE {symbol_column} IN ({placeholders})"
-        params = list(selected_symbols)
+        where_parts.append(f"{symbol_column} IN ({placeholders})")
+        params.extend(selected_symbols)
+    where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     rows = connection.execute(
         f"""
         SELECT
@@ -175,17 +334,20 @@ def _query_ohlc_rows(
         """,
         params,
     ).fetchall()
-    return [
-        OhlcBar(
-            symbol=str(symbol),
-            bar_dt=_as_datetime(bar_dt),
-            open=float(open_price),
-            high=float(high_price),
-            low=float(low_price),
-            close=float(close_price),
-        )
-        for symbol, bar_dt, open_price, high_price, low_price, close_price in rows
-    ]
+    return LoadedRowsResult(
+        rows=[
+            OhlcBar(
+                symbol=str(symbol),
+                bar_dt=_as_datetime(bar_dt),
+                open=float(open_price),
+                high=float(high_price),
+                low=float(low_price),
+                close=float(close_price),
+            )
+            for symbol, bar_dt, open_price, high_price, low_price, close_price in rows
+        ],
+        selected_adjust_method=selected_adjust_method,
+    )
 
 
 def _select_symbol_prefix_sample(
@@ -236,6 +398,42 @@ def _group_rows_by_symbol(rows: Iterable[OhlcBar]) -> dict[str, list[OhlcBar]]:
     for row in rows:
         grouped[row.symbol].append(row)
     return dict(grouped)
+
+
+def _summarize_loaded_duplicates(rows: list[OhlcBar], *, example_limit: int = 5) -> tuple[int, tuple[str, ...]]:
+    duplicate_counts: dict[tuple[str, datetime], int] = defaultdict(int)
+    for row in rows:
+        duplicate_counts[(row.symbol, row.bar_dt)] += 1
+    duplicate_keys = [
+        (symbol, bar_dt, count)
+        for (symbol, bar_dt), count in duplicate_counts.items()
+        if count > 1
+    ]
+    examples = tuple(
+        f"{symbol}@{bar_dt.date().isoformat()}x{count}"
+        for symbol, bar_dt, count in duplicate_keys[:example_limit]
+    )
+    return len(duplicate_keys), examples
+
+
+def _validate_streamed_symbol_rows(
+    *,
+    symbol: str,
+    rows: list[OhlcBar],
+    timeframe: Timeframe,
+    selected_adjust_method: str | None,
+) -> None:
+    if timeframe is not Timeframe.DAY:
+        return
+    duplicate_group_count, duplicate_examples = _summarize_loaded_duplicates(rows)
+    if duplicate_group_count == 0:
+        return
+    examples = ", ".join(duplicate_examples) if duplicate_examples else f"{symbol}@duplicate"
+    raise SourceContractViolationError(
+        "MALF day source contract violated after formalization: "
+        f"adjust_method={selected_adjust_method or 'unfiltered'}, duplicate_symbol_trade_date_groups={duplicate_group_count}, "
+        f"examples={examples}"
+    )
 
 
 def _aggregate_rows(rows: list[OhlcBar], timeframe: Timeframe) -> list[OhlcBar]:

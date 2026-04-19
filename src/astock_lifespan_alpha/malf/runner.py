@@ -12,7 +12,7 @@ from astock_lifespan_alpha.core.paths import WorkspaceRoots, default_settings
 from astock_lifespan_alpha.malf.contracts import CheckpointSummary, MalfRunSummary, RunStatus, Timeframe
 from astock_lifespan_alpha.malf.engine import EngineResult, run_malf_engine
 from astock_lifespan_alpha.malf.schema import initialize_malf_schema
-from astock_lifespan_alpha.malf.source import load_source_bars
+from astock_lifespan_alpha.malf.source import load_source_bars, stream_source_bars
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,9 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
     initialize_malf_schema(target_path)
 
     run_id = f"{timeframe.value}-{uuid4().hex[:12]}"
-    source = load_source_bars(workspace, timeframe)
+    source = load_source_bars(workspace, timeframe) if timeframe is not Timeframe.DAY else None
+    if source is not None:
+        source.validate_for_timeframe(timeframe)
     message = "MALF run completed."
     counts = {
         "pivot_rows": 0,
@@ -62,18 +64,28 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
     }
     symbols_updated = 0
     latest_bar_dt: datetime | None = None
+    source_path = str(source.source_path) if source is not None and source.source_path is not None else None
+    symbols_seen = 0
+    input_rows = 0
+    source_items = source.bars_by_symbol.items() if source is not None else ()
+    if timeframe is Timeframe.DAY:
+        streamed_source = stream_source_bars(workspace, timeframe)
+        source_path = str(streamed_source.source_path) if streamed_source.source_path is not None else None
+        source_items = streamed_source.rows_by_symbol
 
     with duckdb.connect(str(target_path)) as connection:
         _insert_run_stub(
             connection=connection,
             run_id=run_id,
             timeframe=timeframe,
-            source_path=str(source.source_path) if source.source_path is not None else None,
-            input_rows=source.row_count,
-            symbols_seen=len(source.bars_by_symbol),
+            source_path=source_path,
+            input_rows=input_rows,
+            symbols_seen=symbols_seen,
         )
         connection.execute("DELETE FROM malf_work_queue WHERE timeframe = ?", [timeframe.value])
-        for symbol, bars in source.bars_by_symbol.items():
+        for symbol, bars in source_items:
+            input_rows += len(bars)
+            symbols_seen += 1
             symbol_result = _execute_symbol_build(
                 connection=connection,
                 timeframe=timeframe,
@@ -93,13 +105,15 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
             counts["wave_scale_profile_rows"] += symbol_result.wave_scale_profile_rows
             symbols_updated += 1 if symbol_result.symbol_updated else 0
 
-        if not source.bars_by_symbol:
+        if symbols_seen == 0:
             message = "MALF schema initialized without source bars."
 
         connection.execute(
             """
             UPDATE malf_run
             SET
+                input_rows = ?,
+                symbols_seen = ?,
                 status = ?,
                 symbols_updated = ?,
                 inserted_pivots = ?,
@@ -113,6 +127,8 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
             WHERE run_id = ?
             """,
             [
+                input_rows,
+                symbols_seen,
                 RunStatus.COMPLETED.value,
                 symbols_updated,
                 counts["pivot_rows"],
@@ -132,11 +148,11 @@ def _run_malf_build(*, runner_name: str, timeframe: Timeframe, settings: Workspa
         run_id=run_id,
         status=RunStatus.COMPLETED.value,
         target_path=str(target_path),
-        source_path=str(source.source_path) if source.source_path is not None else None,
+        source_path=source_path,
         message=message,
         materialization_counts=counts,
         checkpoint_summary=CheckpointSummary(
-            symbols_seen=len(source.bars_by_symbol),
+            symbols_seen=symbols_seen,
             symbols_updated=symbols_updated,
             latest_bar_dt=latest_bar_dt.isoformat() if latest_bar_dt is not None else None,
         ),

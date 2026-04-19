@@ -69,6 +69,12 @@ class ProfileRow:
     wave_position_zone: str
 
 
+@dataclass(frozen=True)
+class _WaveSamplePool:
+    new_counts: list[int]
+    no_new_spans: list[int]
+
+
 @dataclass
 class _WaveState:
     wave_index: int
@@ -94,7 +100,7 @@ class EngineResult:
 def run_malf_engine(*, symbol: str, timeframe: Timeframe, bars: Iterable[OhlcBar]) -> EngineResult:
     """Materialize MALF ledgers for one symbol and one timeframe."""
 
-    ordered_bars = sorted(list(bars), key=lambda bar: bar.bar_dt)
+    ordered_bars = _prepare_ordered_bars(symbol=symbol, timeframe=timeframe, bars=bars)
     if not ordered_bars:
         return EngineResult(pivots=[], waves=[], state_snapshots=[], wave_scale_snapshots=[], wave_scale_profiles=[])
 
@@ -172,8 +178,9 @@ def run_malf_engine(*, symbol: str, timeframe: Timeframe, bars: Iterable[OhlcBar
         )
     )
 
-    ranked_snapshots = _rank_snapshots(snapshots=snapshots, waves=waves)
-    profiles = _build_profiles(waves=waves)
+    sample_pools = _build_wave_sample_pools(waves)
+    ranked_snapshots = _rank_snapshots(snapshots=snapshots, sample_pools=sample_pools)
+    profiles = _build_profiles(waves=waves, sample_pools=sample_pools)
     return EngineResult(
         pivots=pivots,
         waves=waves,
@@ -181,6 +188,27 @@ def run_malf_engine(*, symbol: str, timeframe: Timeframe, bars: Iterable[OhlcBar
         wave_scale_snapshots=ranked_snapshots,
         wave_scale_profiles=profiles,
     )
+
+
+def _prepare_ordered_bars(*, symbol: str, timeframe: Timeframe, bars: Iterable[OhlcBar]) -> list[OhlcBar]:
+    materialized_bars = list(bars)
+    if not materialized_bars:
+        return []
+    is_ordered = True
+    for index in range(1, len(materialized_bars)):
+        if materialized_bars[index - 1].bar_dt > materialized_bars[index].bar_dt:
+            is_ordered = False
+            break
+    ordered_bars = materialized_bars if is_ordered else sorted(materialized_bars, key=lambda bar: bar.bar_dt)
+    for index in range(1, len(ordered_bars)):
+        previous_bar = ordered_bars[index - 1]
+        current_bar = ordered_bars[index]
+        if previous_bar.bar_dt == current_bar.bar_dt:
+            raise ValueError(
+                "MALF engine requires unique bar_dt per symbol/timeframe: "
+                f"symbol={symbol}, timeframe={timeframe.value}, bar_dt={current_bar.bar_dt.isoformat()}"
+            )
+    return ordered_bars
 
 
 def _initialize_state(symbol: str, timeframe: Timeframe, bars: list[OhlcBar]) -> _WaveState:
@@ -322,22 +350,39 @@ def _pivot(symbol: str, timeframe: Timeframe, wave_id: str, bar_dt: datetime, pi
     )
 
 
-def _rank_snapshots(*, snapshots: list[SnapshotRow], waves: list[WaveRow]) -> list[SnapshotRow]:
+def _build_wave_sample_pools(waves: list[WaveRow]) -> dict[tuple[str, str, str], _WaveSamplePool]:
+    grouped_new_counts: dict[tuple[str, str, str], list[int]] = {}
+    grouped_no_new_spans: dict[tuple[str, str, str], list[int]] = {}
+    for wave in waves:
+        key = (wave.symbol, wave.timeframe, wave.direction)
+        grouped_new_counts.setdefault(key, []).append(wave.new_count)
+        grouped_no_new_spans.setdefault(key, []).append(wave.no_new_span)
+    return {
+        key: _WaveSamplePool(
+            new_counts=grouped_new_counts.get(key, []),
+            no_new_spans=grouped_no_new_spans.get(key, []),
+        )
+        for key in set(grouped_new_counts) | set(grouped_no_new_spans)
+    }
+
+
+def _rank_snapshots(
+    *,
+    snapshots: list[SnapshotRow],
+    sample_pools: dict[tuple[str, str, str], _WaveSamplePool],
+) -> list[SnapshotRow]:
     ranked_snapshots: list[SnapshotRow] = []
     for snapshot in snapshots:
-        sample = [
-            wave
-            for wave in waves
-            if wave.symbol == snapshot.symbol and wave.timeframe == snapshot.timeframe and wave.direction == snapshot.direction
-        ]
-        sample_size = max(1, len(sample))
+        sample_pool = sample_pools.get((snapshot.symbol, snapshot.timeframe, snapshot.direction))
+        new_count_sample = sample_pool.new_counts if sample_pool and sample_pool.new_counts else [snapshot.new_count]
+        no_new_span_sample = sample_pool.no_new_spans if sample_pool and sample_pool.no_new_spans else [snapshot.no_new_span]
         update_rank = _percentile(
             value=snapshot.new_count,
-            sample=[wave.new_count for wave in sample] or [snapshot.new_count],
+            sample=new_count_sample,
         )
         stagnation_rank = _percentile(
             value=snapshot.no_new_span,
-            sample=[wave.no_new_span for wave in sample] or [snapshot.no_new_span],
+            sample=no_new_span_sample,
         )
         zone = _classify_zone(
             update_rank=update_rank,
@@ -359,24 +404,24 @@ def _rank_snapshots(*, snapshots: list[SnapshotRow], waves: list[WaveRow]) -> li
                 life_state=snapshot.life_state,
                 update_rank=update_rank,
                 stagnation_rank=stagnation_rank,
-                wave_position_zone=zone.value if sample_size else WavePositionZone.EARLY_PROGRESS.value,
+                wave_position_zone=zone.value,
             )
         )
     return ranked_snapshots
 
 
-def _build_profiles(*, waves: list[WaveRow]) -> list[ProfileRow]:
+def _build_profiles(
+    *,
+    waves: list[WaveRow],
+    sample_pools: dict[tuple[str, str, str], _WaveSamplePool],
+) -> list[ProfileRow]:
     profiles: list[ProfileRow] = []
     for wave in waves:
-        sample = [
-            candidate
-            for candidate in waves
-            if candidate.symbol == wave.symbol
-            and candidate.timeframe == wave.timeframe
-            and candidate.direction == wave.direction
-        ]
-        update_rank = _percentile(value=wave.new_count, sample=[candidate.new_count for candidate in sample])
-        stagnation_rank = _percentile(value=wave.no_new_span, sample=[candidate.no_new_span for candidate in sample])
+        sample_pool = sample_pools.get((wave.symbol, wave.timeframe, wave.direction))
+        new_count_sample = sample_pool.new_counts if sample_pool and sample_pool.new_counts else [wave.new_count]
+        no_new_span_sample = sample_pool.no_new_spans if sample_pool and sample_pool.no_new_spans else [wave.no_new_span]
+        update_rank = _percentile(value=wave.new_count, sample=new_count_sample)
+        stagnation_rank = _percentile(value=wave.no_new_span, sample=no_new_span_sample)
         profiles.append(
             ProfileRow(
                 profile_nk=f"{wave.wave_id}:profile",
@@ -384,7 +429,7 @@ def _build_profiles(*, waves: list[WaveRow]) -> list[ProfileRow]:
                 timeframe=wave.timeframe,
                 direction=wave.direction,
                 wave_id=wave.wave_id,
-                sample_size=len(sample),
+                sample_size=len(new_count_sample),
                 new_count=wave.new_count,
                 no_new_span=wave.no_new_span,
                 update_rank=update_rank,

@@ -157,3 +157,17 @@ Stage-five engineering defaults are frozen:
 - 诊断表：`stock_daily_adjusted`
 - 边界：只做 `PYTHONPATH` 入口修正与只读诊断，不修改 MALF 业务语义
 - 结果：`engine_timing` 已确认，真实采样写回同时暴露 `snapshot_nk / pivot_nk` 重复主键异常
+## 阶段十一补充
+
+- 新规格：`docs/02-spec/16-stage-eleven-malf-day-repair-spec-v1-20260419.md`
+- 规格冻结结论：`docs/03-execution/36-stage-eleven-malf-day-repair-spec-freeze-conclusion-20260419.md`
+- 工程收口结论：`docs/03-execution/37-stage-eleven-malf-day-repair-engineering-closeout-conclusion-20260419.md`
+
+阶段十一正式冻结并实现了以下口径：
+
+- `stock_daily_adjusted` 仅以 `adjust_method = backward` 进入 MALF day
+- `symbol + trade_date -> 1 day bar`
+- 重复 `symbol + trade_date + backward` 视为 source contract violation
+- 真实诊断窗口下 `engine_timing` 已不再是主瓶颈，当前转为 `write_timing`
+
+当前正式状态为：阶段十一完成，阶段九重演待在 `write_timing` 与真实全量 build 持续时长的新瓶颈上重新发起。

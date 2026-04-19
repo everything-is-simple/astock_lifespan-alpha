@@ -97,3 +97,11 @@ Stage-five implementation defaults are frozen for engineering:
 - `stage-ten-malf-day-diagnosis` 已冻结。
 - 阶段十完成。
 - 阶段九重演待重新发起。
+## 阶段十一补充
+
+- `36` 阶段十一 MALF day repair 规格冻结
+- `37` 阶段十一 MALF day repair 工程收口
+- `stage-eleven-malf-day-repair` 已冻结 `adjust_method = backward` 的 MALF day source contract
+- 同一真实诊断窗口下 `engine_seconds` 已从 `6.789267` 降到 `1.419344`
+- 当前真实主瓶颈已转到 `write_timing`
+- 阶段九重演仍待在新瓶颈上重新发起

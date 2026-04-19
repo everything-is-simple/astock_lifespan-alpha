@@ -4,12 +4,14 @@ from datetime import datetime
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from astock_lifespan_alpha.malf import run_malf_day_build, run_malf_month_build, run_malf_week_build
 from astock_lifespan_alpha.malf.source import load_source_bars
 from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.malf.contracts import Timeframe
 from astock_lifespan_alpha.malf.schema import MALF_TABLES
+from astock_lifespan_alpha.malf.source import DAY_ADJUST_METHOD, SourceContractViolationError
 
 
 def test_malf_runner_initializes_formal_schema(monkeypatch, tmp_path):
@@ -147,6 +149,43 @@ def test_malf_source_reads_real_stock_adjusted_timeframe_databases(monkeypatch, 
     assert month_source.bars_by_symbol["AAA"][0].bar_dt.date().isoformat() == "2026-01-31"
 
 
+def test_malf_day_source_filters_stock_daily_adjusted_to_backward(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_adjusted_bars_with_adjust_method(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02", "none", 10.0, 10.5, 9.8, 10.1),
+            ("AAA", "2026-01-02", "backward", 20.0, 21.0, 19.5, 20.8),
+            ("AAA", "2026-01-02", "forward", 30.0, 31.0, 29.8, 30.6),
+            ("AAA", "2026-01-03", "backward", 20.8, 22.0, 20.0, 21.6),
+            ("BBB", "2026-01-03", "backward", 8.0, 8.5, 7.9, 8.1),
+        ],
+    )
+
+    source = load_source_bars(default_settings(repo_root=workspace / "repo"), Timeframe.DAY)
+
+    assert source.selected_adjust_method == DAY_ADJUST_METHOD
+    assert source.duplicate_symbol_trade_date_groups == 0
+    assert [bar.bar_dt.date().isoformat() for bar in source.bars_by_symbol["AAA"]] == ["2026-01-02", "2026-01-03"]
+    assert source.bars_by_symbol["AAA"][0].open == 20.0
+    assert source.bars_by_symbol["AAA"][0].close == 20.8
+
+
+def test_malf_day_runner_fails_fast_on_duplicate_backward_rows(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_adjusted_bars_with_adjust_method(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02", "backward", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-02", "backward", 10.1, 11.1, 9.6, 10.9),
+            ("AAA", "2026-01-03", "backward", 10.8, 12.2, 10.1, 12.0),
+        ],
+    )
+
+    with pytest.raises(SourceContractViolationError, match="duplicate_symbol_trade_date_groups=1"):
+        run_malf_day_build(settings=default_settings(repo_root=workspace / "repo"))
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
@@ -210,5 +249,31 @@ def _write_stock_adjusted_bars(
         )
         connection.executemany(
             f"INSERT INTO {table_name} VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+
+
+def _write_stock_adjusted_bars_with_adjust_method(
+    database_path: Path,
+    rows: list[tuple[str, str, str, float, float, float, float]],
+) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DROP TABLE IF EXISTS stock_daily_adjusted")
+        connection.execute(
+            """
+            CREATE TABLE stock_daily_adjusted (
+                code TEXT,
+                trade_date DATE,
+                adjust_method TEXT,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO stock_daily_adjusted VALUES (?, ?, ?, ?, ?, ?, ?)",
             rows,
         )

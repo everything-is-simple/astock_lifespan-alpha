@@ -17,7 +17,9 @@ from astock_lifespan_alpha.malf.engine import run_malf_engine
 from astock_lifespan_alpha.malf.runner import _insert_result_rows, _replace_symbol_rows, _upsert_checkpoint
 from astock_lifespan_alpha.malf.schema import initialize_malf_schema
 from astock_lifespan_alpha.malf.source import (
+    DAY_ADJUST_METHOD,
     ResolvedSourceTable,
+    SourceBars,
     load_source_bars_limited,
     resolve_source_table,
 )
@@ -27,10 +29,15 @@ from astock_lifespan_alpha.malf.source import (
 class SourceTableSummary:
     source_path: str
     table_name: str
+    selected_adjust_method: str | None
     row_count: int
     symbol_count: int
     min_bar_dt: str | None
     max_bar_dt: str | None
+    duplicate_symbol_trade_date_groups_before_filter: int
+    duplicate_symbol_trade_date_examples_before_filter: list[str]
+    duplicate_symbol_trade_date_groups_after_filter: int
+    duplicate_symbol_trade_date_examples_after_filter: list[str]
 
 
 @dataclass(frozen=True)
@@ -102,11 +109,21 @@ def profile_malf_day_real_data(
     report_markdown_path = report_root / f"{report_id}.md"
 
     resolved_table = resolve_source_table(workspace, Timeframe.DAY)
-    source_summary = _summarize_source_table(resolved_table) if resolved_table is not None else None
-
     source_load_start = perf_counter()
     source_bars = load_source_bars_limited(workspace, Timeframe.DAY, symbol_limit=symbol_limit)
     source_load_seconds = round(perf_counter() - source_load_start, 6)
+    profiled_symbols = list(source_bars.bars_by_symbol)
+    if symbol_limit is not None:
+        profiled_symbols = profiled_symbols[:symbol_limit]
+    source_summary = (
+        _summarize_source_table(
+            resolved_table,
+            source_bars,
+            profiled_symbols=profiled_symbols,
+        )
+        if resolved_table is not None
+        else None
+    )
 
     profiled_items = list(source_bars.bars_by_symbol.items())
     if symbol_limit is not None:
@@ -126,29 +143,36 @@ def profile_malf_day_real_data(
         profiled_bars = bars[-bar_limit_per_symbol:] if bar_limit_per_symbol is not None else bars
         if len(profiled_bars) != len(bars):
             truncated_symbols += 1
-        engine_start = perf_counter()
-        result = run_malf_engine(symbol=symbol, timeframe=Timeframe.DAY, bars=profiled_bars)
-        engine_seconds = round(perf_counter() - engine_start, 6)
-
-        write_seconds = 0.0
         symbol_error: str | None = None
+        result = None
+        engine_start = perf_counter()
         try:
-            with duckdb.connect(str(temp_db_path)) as connection:
-                write_start = perf_counter()
-                _replace_symbol_rows(connection=connection, timeframe=Timeframe.DAY, symbol=symbol)
-                _insert_result_rows(connection=connection, run_id=report_id, result=result)
-                _upsert_checkpoint(
-                    connection=connection,
-                    timeframe=Timeframe.DAY,
-                    symbol=symbol,
-                    run_id=report_id,
-                    last_bar_dt=profiled_bars[-1].bar_dt,
-                )
-                write_seconds = round(perf_counter() - write_start, 6)
+            result = run_malf_engine(symbol=symbol, timeframe=Timeframe.DAY, bars=profiled_bars)
+            engine_seconds = round(perf_counter() - engine_start, 6)
         except Exception as exc:
-            write_seconds = round(write_seconds, 6)
+            engine_seconds = round(perf_counter() - engine_start, 6)
             symbol_error = str(exc)
             symbol_errors += 1
+
+        write_seconds = 0.0
+        if result is not None:
+            with duckdb.connect(str(temp_db_path)) as connection:
+                try:
+                    write_start = perf_counter()
+                    _replace_symbol_rows(connection=connection, timeframe=Timeframe.DAY, symbol=symbol)
+                    _insert_result_rows(connection=connection, run_id=report_id, result=result)
+                    _upsert_checkpoint(
+                        connection=connection,
+                        timeframe=Timeframe.DAY,
+                        symbol=symbol,
+                        run_id=report_id,
+                        last_bar_dt=profiled_bars[-1].bar_dt,
+                    )
+                    write_seconds = round(perf_counter() - write_start, 6)
+                except Exception as exc:
+                    write_seconds = round(perf_counter() - write_start, 6)
+                    symbol_error = str(exc)
+                    symbol_errors += 1
 
         engine_seconds_total += engine_seconds
         write_seconds_total += write_seconds
@@ -176,9 +200,16 @@ def profile_malf_day_real_data(
         else "MALF day diagnostics completed without a resolved source table."
     )
     if symbol_errors:
-        message = f"{message} Symbol write errors recorded: {symbol_errors}."
+        message = f"{message} Symbol errors recorded: {symbol_errors}."
     if truncated_symbols:
         message = f"{message} Bar profiling truncated for {truncated_symbols} symbols."
+    if source_bars.duplicate_symbol_trade_date_groups:
+        examples = ", ".join(source_bars.duplicate_symbol_trade_date_examples) or "-"
+        message = (
+            f"{message} Source contract violations remain after adjust_method={source_bars.selected_adjust_method or 'unfiltered'} "
+            f"formalization: duplicate_symbol_trade_date_groups={source_bars.duplicate_symbol_trade_date_groups}, "
+            f"examples={examples}."
+        )
     report = MalfDayDiagnosticReport(
         runner_name="profile_malf_day_real_data",
         report_id=report_id,
@@ -200,7 +231,12 @@ def profile_malf_day_real_data(
     return report
 
 
-def _summarize_source_table(resolved_table: ResolvedSourceTable) -> SourceTableSummary:
+def _summarize_source_table(
+    resolved_table: ResolvedSourceTable,
+    source_bars: SourceBars,
+    *,
+    profiled_symbols: list[str],
+) -> SourceTableSummary:
     with duckdb.connect(str(resolved_table.source_path), read_only=True) as connection:
         column_info = connection.execute(f"PRAGMA table_info('{resolved_table.table_name}')").fetchall()
         column_names = {row[1] for row in column_info}
@@ -216,14 +252,76 @@ def _summarize_source_table(resolved_table: ResolvedSourceTable) -> SourceTableS
             FROM {resolved_table.table_name}
             """
         ).fetchone()
+        duplicate_group_count_before_filter, duplicate_examples_before_filter = _summarize_duplicate_groups(
+            connection=connection,
+            table_name=resolved_table.table_name,
+            symbol_column=symbol_column,
+            date_column=date_column,
+            profiled_symbols=profiled_symbols,
+        )
     return SourceTableSummary(
         source_path=str(resolved_table.source_path),
         table_name=resolved_table.table_name,
+        selected_adjust_method=source_bars.selected_adjust_method or (
+            DAY_ADJUST_METHOD if "adjust_method" in column_names else None
+        ),
         row_count=int(row_count),
         symbol_count=int(symbol_count),
         min_bar_dt=str(min_bar_dt) if min_bar_dt is not None else None,
         max_bar_dt=str(max_bar_dt) if max_bar_dt is not None else None,
+        duplicate_symbol_trade_date_groups_before_filter=duplicate_group_count_before_filter,
+        duplicate_symbol_trade_date_examples_before_filter=duplicate_examples_before_filter,
+        duplicate_symbol_trade_date_groups_after_filter=source_bars.duplicate_symbol_trade_date_groups,
+        duplicate_symbol_trade_date_examples_after_filter=list(source_bars.duplicate_symbol_trade_date_examples),
     )
+
+
+def _summarize_duplicate_groups(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    table_name: str,
+    symbol_column: str,
+    date_column: str,
+    profiled_symbols: list[str],
+    example_limit: int = 5,
+) -> tuple[int, list[str]]:
+    where_clause = ""
+    params: list[object] = []
+    if profiled_symbols:
+        placeholders = ", ".join(["?"] * len(profiled_symbols))
+        where_clause = f"WHERE {symbol_column} IN ({placeholders})"
+        params.extend(profiled_symbols)
+    duplicate_group_count = connection.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM (
+            SELECT {symbol_column}, {date_column}
+            FROM {table_name}
+            {where_clause}
+            GROUP BY 1, 2
+            HAVING COUNT(*) > 1
+        )
+        """,
+        params,
+    ).fetchone()[0]
+    example_params = list(params)
+    example_params.append(example_limit)
+    example_rows = connection.execute(
+        f"""
+        SELECT {symbol_column}, {date_column}, COUNT(*) AS duplicate_count
+        FROM {table_name}
+        {where_clause}
+        GROUP BY 1, 2
+        HAVING COUNT(*) > 1
+        ORDER BY {symbol_column}, {date_column}
+        LIMIT ?
+        """,
+        example_params,
+    ).fetchall()
+    return int(duplicate_group_count), [
+        f"{symbol}@{bar_dt.isoformat()}x{duplicate_count}"
+        for symbol, bar_dt, duplicate_count in example_rows
+    ]
 
 
 def _classify_bottleneck(timings: PhaseTimingSummary) -> str:
@@ -257,10 +355,27 @@ def _render_markdown_report(report: MalfDayDiagnosticReport) -> str:
             [
                 f"- source_path: `{report.source.source_path}`",
                 f"- table_name: `{report.source.table_name}`",
+                f"- selected_adjust_method: `{report.source.selected_adjust_method}`",
                 f"- row_count: `{report.source.row_count}`",
                 f"- symbol_count: `{report.source.symbol_count}`",
                 f"- min_bar_dt: `{report.source.min_bar_dt}`",
                 f"- max_bar_dt: `{report.source.max_bar_dt}`",
+                (
+                    "- duplicate_symbol_trade_date_groups_before_filter: "
+                    f"`{report.source.duplicate_symbol_trade_date_groups_before_filter}`"
+                ),
+                (
+                    "- duplicate_symbol_trade_date_examples_before_filter: "
+                    f"`{report.source.duplicate_symbol_trade_date_examples_before_filter}`"
+                ),
+                (
+                    "- duplicate_symbol_trade_date_groups_after_filter: "
+                    f"`{report.source.duplicate_symbol_trade_date_groups_after_filter}`"
+                ),
+                (
+                    "- duplicate_symbol_trade_date_examples_after_filter: "
+                    f"`{report.source.duplicate_symbol_trade_date_examples_after_filter}`"
+                ),
             ]
         )
     lines.extend(

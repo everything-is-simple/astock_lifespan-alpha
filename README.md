@@ -134,3 +134,15 @@ Stage-five implementation defaults are now frozen before engineering work:
 ## 文档入口
 
 正式文档请从 [docs/README.md](H:\astock_lifespan-alpha\docs\README.md) 开始阅读。
+## 阶段十一更新
+
+阶段十一 `stage-eleven-malf-day-repair` 已完成并正式登记：
+
+- `stock_daily_adjusted` 的 MALF day source contract 已冻结为 `adjust_method = backward`
+- 过滤前的 `code + trade_date` 重复事实已在真实诊断中登记，过滤后唯一性恢复
+- `run_malf_engine()` 已拒绝重复 `bar_dt` 输入
+- `_rank_snapshots()` 与 `_build_profiles()` 已改为 sample pool 复用
+- 同一真实诊断窗口下，`engine_seconds` 已从 `6.789267` 降到 `1.419344`
+- 当前真实瓶颈已从 `engine_timing` 转到 `write_timing`
+
+阶段九真实重演尚未重新发起；下一轮关注点不再是 `snapshot_nk / pivot_nk` 主键冲突，而是全量真实 build 的写入耗时与持续时长。
