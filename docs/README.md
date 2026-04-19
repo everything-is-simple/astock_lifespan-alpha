@@ -33,9 +33,9 @@ card -> evidence -> record -> conclusion
 13. `docs/02-spec/09-portfolio-plan-to-trade-bridge-spec-v1-20260419.md`
 14. `docs/02-spec/10-astock-lifespan-alpha-reconstruction-plan-part2-stage-five-trade-v1-20260419.md`
 15. `docs/02-spec/11-system-minimal-readout-and-runner-spec-v1-20260419.md`
-16. `docs/03-execution/README.md`
-17. `docs/03-execution/26-stage-six-system-readout-spec-freeze-conclusion-20260419.md`
-18. `docs/03-execution/27-stage-six-system-readout-engineering-closeout-conclusion-20260419.md`
+16. `docs/02-spec/12-data-source-fact-contract-alignment-spec-v1-20260419.md`
+17. `docs/03-execution/README.md`
+18. `docs/03-execution/28-data-source-fact-contract-alignment-spec-freeze-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -75,7 +75,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段六 `trade -> system` 最小读出与 runner，并已完成阶段六工程收口。
+当前仓库已经完成阶段六 `trade -> system` 最小读出与 runner，并已冻结阶段七 data 源事实契约。
 
 这意味着：
 
@@ -87,6 +87,8 @@ card -> evidence -> record -> conclusion
 - `stage-six-system` 已冻结 `trade -> system` 最小读出边界
 - 阶段六工程收口闭环 `27` 已补齐
 - `run_system_from_trade` 与 `system_run / system_trade_readout / system_portfolio_trade_summary` 已落地
+- 阶段七规格冻结闭环 `28` 已补齐
+- `stage-seven-data-source-contract` 已冻结真实本地 stock source fact 路径、表名与字段映射
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -107,3 +109,9 @@ Stage-five engineering defaults are frozen:
 - 主题：`trade -> system` 最小读出与 runner
 - 裁决：阶段六完成，下一阶段待规划
 - 边界：只读取 `trade` 正式输出，不回读 `alpha / position / portfolio_plan`，不触发上游 runner
+
+阶段七 data 源事实契约：
+- 文档标识：`stage-seven-data-source-contract`
+- 主题：6 个本地 source fact DuckDB、stock 表名和 `code -> symbol` / `trade_date -> bar_dt` 字段映射
+- 裁决：阶段七规格冻结，工程待实施
+- 下一阶段入口：阶段八 `data -> system` 最小全链路编排

@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段六 `trade -> system` 最小读出与 runner；下一阶段待规划。重点是：
+当前已完成阶段六 `trade -> system` 最小读出与 runner；阶段七 data 源事实契约已冻结，工程待实施。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -32,12 +32,14 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - 阶段六 v1 主线固定为 `trade -> system`
 - 阶段六工程收口闭环 `27` 已补齐
 - `run_system_from_trade` 与 `system_run / system_trade_readout / system_portfolio_trade_summary` 已落地
+- 阶段七规格冻结闭环 `28` 已补齐
+- 阶段七首版固定只读 stock，并对齐 6 个本地 source fact DuckDB
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经成立；阶段六完成，下一阶段待规划。
+> `alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经成立；阶段六完成，阶段七 data 源事实契约已冻结、工程待实施。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -66,6 +68,12 @@ Stage-five implementation defaults are now frozen before engineering work:
 - `run_system_from_trade`
 - `system_run / system_trade_readout / system_portfolio_trade_summary`
 - 收口结论：`docs/03-execution/27-stage-six-system-readout-engineering-closeout-conclusion-20260419.md`
+
+阶段七 data 源事实契约已冻结：
+- `docs/02-spec/12-data-source-fact-contract-alignment-spec-v1-20260419.md`
+- 文档标识：`stage-seven-data-source-contract`
+- 主题：真实本地 stock source fact 路径、表名与字段映射对齐
+- 下一阶段：阶段八 `data -> system` 最小全链路编排待规划
 
 ## 文档入口
 

@@ -170,3 +170,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/27-stage-six-system-readout-engineering-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段六 `run_system_from_trade` 与 `system_run / system_trade_readout / system_portfolio_trade_summary` 已落地；阶段六完成，下一阶段待规划。
+
+### `28` 阶段七 data 源事实契约规格冻结
+
+- 结论文件：`docs/03-execution/28-data-source-fact-contract-alignment-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段七 `stage-seven-data-source-contract` 已冻结，真实本地 stock source fact 路径、表名与字段映射已登记；阶段七规格冻结，工程待实施，后续阶段八 `data -> system` 编排待规划。

@@ -68,6 +68,7 @@ card -> evidence -> record -> conclusion
 - `25` 阶段五 trade 工程收口
 - `26` 阶段六 system 读出规格冻结
 - `27` 阶段六 system 读出工程收口
+- `28` 阶段七 data 源事实契约规格冻结
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -80,4 +81,5 @@ Stage-five implementation defaults are frozen for engineering:
 - `reconstruction-plan-part2` 已落档。
 - `stage-six-system` 已冻结。
 - 阶段六完成。
-- 下一阶段待规划。
+- `stage-seven-data-source-contract` 已冻结。
+- 阶段七规格冻结，工程待实施。
