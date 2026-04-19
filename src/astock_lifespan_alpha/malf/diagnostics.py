@@ -91,7 +91,7 @@ def profile_malf_day_real_data(
     settings: WorkspaceRoots | None = None,
     top_n: int = 10,
     symbol_limit: int | None = 10,
-    bar_limit_per_symbol: int | None = 2000,
+    bar_limit_per_symbol: int | None = 1000,
 ) -> MalfDayDiagnosticReport:
     workspace = settings or default_settings()
     workspace.ensure_directories()
