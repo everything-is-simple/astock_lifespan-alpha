@@ -18,19 +18,19 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段二 `MALF` 冻结与构建，重点是：
+当前已完成阶段三 `alpha` 五账本与 `alpha_signal`，重点是：
 
-- `MALF` 文本规格与图版规格正式冻结
-- `malf_day / malf_week / malf_month` 三周期正式账本已建立
-- `MALF` runner、queue、checkpoint 与 rebuild flow 已落地
-- `malf_wave_scale_snapshot / malf_wave_scale_profile` 已形成 `alpha` 可读输入面
-- 阶段二执行闭环 `02-06` 已补齐
+- 五个 PAS trigger 正式规格与 `alpha_signal` 汇总规格已冻结
+- `alpha_bof / tst / pb / cpb / bpb / alpha_signal` 账本已建立
+- 六个 alpha runner、共享输入层、queue、checkpoint 与 replay 骨架已落地
+- `alpha_signal` 已形成阶段四 `position` 可读输入面
+- 阶段三执行闭环 `08-14` 已补齐
 
 这不代表业务逻辑已经实现完成。
 
 当前阶段更准确的含义是：
 
-> `MALF` 作为正式市场结构真值层已经成立，下一阶段将进入 `alpha` 五账本与 `alpha_signal` 的正式重构
+> `MALF -> alpha` 正式主线已经成立，下一阶段将进入 `position` 接口切换与最小主线验证
 
 ## 文档入口
 

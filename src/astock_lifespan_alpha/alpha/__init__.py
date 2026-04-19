@@ -1,5 +1,6 @@
-"""Alpha runner stubs."""
+"""Alpha public runner exports."""
 
+from astock_lifespan_alpha.alpha.contracts import AlphaCheckpointSummary, AlphaRunSummary
 from astock_lifespan_alpha.alpha.runner import (
     run_alpha_bof_build,
     run_alpha_bpb_build,
@@ -10,6 +11,8 @@ from astock_lifespan_alpha.alpha.runner import (
 )
 
 __all__ = [
+    "AlphaCheckpointSummary",
+    "AlphaRunSummary",
     "run_alpha_bof_build",
     "run_alpha_tst_build",
     "run_alpha_pb_build",
@@ -17,4 +20,3 @@ __all__ = [
     "run_alpha_bpb_build",
     "run_alpha_signal_build",
 ]
-

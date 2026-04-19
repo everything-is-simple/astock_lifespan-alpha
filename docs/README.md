@@ -24,9 +24,11 @@ card -> evidence -> record -> conclusion
 4. `docs/02-spec/00-astock-lifespan-alpha-reconstruction-master-plan-v1-20260419.md`
 5. `docs/02-spec/01-malf-wave-scale-semantic-spec-v1-placeholder-20260419.md`
 6. `docs/02-spec/02-malf-wave-scale-diagram-edition-placeholder-20260419.md`
-7. `docs/03-execution/README.md`
-8. `docs/03-execution/06-malf-alpha-facing-outputs-conclusion-20260419.md`
-9. `docs/03-execution/07-stage-two-closeout-conclusion-20260419.md`
+7. `docs/02-spec/03-alpha-pas-trigger-semantic-spec-v1-20260419.md`
+8. `docs/02-spec/04-alpha-signal-aggregation-spec-v1-20260419.md`
+9. `docs/03-execution/README.md`
+10. `docs/03-execution/13-alpha-triggers-and-signal-conclusion-20260419.md`
+11. `docs/03-execution/14-stage-three-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -66,10 +68,10 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段二 `MALF` 冻结与构建，并进入本地收口阶段。
+当前仓库已经完成阶段三 `alpha` 五账本与 `alpha_signal`，并进入阶段四准备期。
 
 这意味着：
 
-- 阶段一与阶段二的实际交付范围都已经进入正式治理闭环
-- `MALF` 已具备正式文本规格、图版口径、三周期账本、runner 与 `alpha` 读取面
-- 阶段三 `alpha` 尚未开始实施，后续仍必须沿用同样的执行纪律
+- 阶段一到阶段三的实际交付范围都已经进入正式治理闭环
+- `alpha` 已具备正式规格、独立账本、共享输入骨架和 `alpha_signal` 正式输出
+- 阶段四 `position` 尚未开始实施，后续仍必须沿用同样的执行纪律

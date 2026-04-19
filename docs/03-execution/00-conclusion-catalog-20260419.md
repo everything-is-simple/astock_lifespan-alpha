@@ -45,3 +45,45 @@
 - 结论文件：`docs/03-execution/07-stage-two-closeout-conclusion-20260419.md`
 - 裁决：`已接受`
 - 说明：阶段二 `02-06` 已整理、验证并完成本地 git 落地，后续可进入阶段三 `alpha` 规划与实施。
+
+### `08` Alpha PAS 触发器规格冻结
+
+- 结论文件：`docs/03-execution/08-alpha-pas-trigger-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：五个 PAS trigger 的正式规格已经冻结，阶段三实现不再允许无文档猜测。
+
+### `09` alpha_signal 汇总规格冻结
+
+- 结论文件：`docs/03-execution/09-alpha-signal-aggregation-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：`alpha_signal` 的字段、状态与汇总边界已经冻结。
+
+### `10` 阶段三文档收口
+
+- 结论文件：`docs/03-execution/10-stage-three-document-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段三的文档前置条件已经形成正式治理闭环。
+
+### `11` Alpha 契约与 Schema
+
+- 结论文件：`docs/03-execution/11-alpha-contracts-and-schema-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：`alpha` 已具备正式契约层与六类数据库 schema。
+
+### `12` Alpha 输入适配与共享骨架
+
+- 结论文件：`docs/03-execution/12-alpha-source-and-shared-runner-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：五个 trigger 已共享统一输入适配层与 runner 生命周期骨架。
+
+### `13` Alpha 五触发器与 alpha_signal
+
+- 结论文件：`docs/03-execution/13-alpha-triggers-and-signal-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：五个 PAS trigger 与 `alpha_signal` 已完成正式实现。
+
+### `14` 阶段三本地收口
+
+- 结论文件：`docs/03-execution/14-stage-three-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段三 `08-13` 已完成本地收口，后续可进入阶段四 `position` 规划与实施。
