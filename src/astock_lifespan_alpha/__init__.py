@@ -9,5 +9,5 @@ __all__ = [
     "portfolio_plan",
     "trade",
     "system",
+    "pipeline",
 ]
-

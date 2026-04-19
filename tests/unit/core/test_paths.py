@@ -36,6 +36,7 @@ def test_workspace_paths_resolve_with_new_namespace(monkeypatch, tmp_path):
     }
     assert settings.databases.namespace_root == data_root.resolve() / NEW_DATA_NAMESPACE
     assert settings.databases.malf_day == data_root.resolve() / NEW_DATA_NAMESPACE / "malf" / "malf_day.duckdb"
+    assert settings.databases.pipeline == data_root.resolve() / NEW_DATA_NAMESPACE / "pipeline" / "pipeline.duckdb"
     assert settings.module_temp_root("malf") == temp_root.resolve() / NEW_DATA_NAMESPACE / "malf"
     assert settings.module_report_root("alpha") == report_root.resolve() / NEW_DATA_NAMESPACE / "alpha"
-    assert settings.module_validated_root("system") == validated_root.resolve() / NEW_DATA_NAMESPACE / "system"
+    assert settings.module_validated_root("pipeline") == validated_root.resolve() / NEW_DATA_NAMESPACE / "pipeline"

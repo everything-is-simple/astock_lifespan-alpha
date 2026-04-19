@@ -17,6 +17,7 @@ FORMAL_MODULES = (
     "portfolio_plan",
     "trade",
     "system",
+    "pipeline",
 )
 
 
@@ -70,6 +71,7 @@ class FormalDatabasePaths:
     portfolio_plan: Path
     trade: Path
     system: Path
+    pipeline: Path
 
     def as_dict(self) -> dict[str, Path]:
         return {
@@ -86,6 +88,7 @@ class FormalDatabasePaths:
             "portfolio_plan": self.portfolio_plan,
             "trade": self.trade,
             "system": self.system,
+            "pipeline": self.pipeline,
         }
 
 
@@ -128,6 +131,7 @@ class WorkspaceRoots:
             portfolio_plan=namespace_root / "portfolio_plan" / "portfolio_plan.duckdb",
             trade=namespace_root / "trade" / "trade.duckdb",
             system=namespace_root / "system" / "system.duckdb",
+            pipeline=namespace_root / "pipeline" / "pipeline.duckdb",
         )
 
     def module_temp_root(self, module_name: str) -> Path:

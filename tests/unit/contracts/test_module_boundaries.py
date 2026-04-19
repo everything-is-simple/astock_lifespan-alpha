@@ -33,3 +33,39 @@ def test_system_module_does_not_call_upstream_runners():
         for term in forbidden_terms:
             assert term not in content
 
+
+def test_business_modules_do_not_import_pipeline():
+    repo_root = Path(__file__).resolve().parents[3]
+    module_roots = [
+        repo_root / "src" / "astock_lifespan_alpha" / module_name
+        for module_name in ("malf", "alpha", "position", "portfolio_plan", "trade", "system")
+    ]
+    checked_files = [file_path for module_root in module_roots for file_path in module_root.rglob("*.py")]
+
+    assert checked_files, "Expected business source files to exist."
+    for file_path in checked_files:
+        content = file_path.read_text(encoding="utf-8")
+        assert "astock_lifespan_alpha.pipeline" not in content
+
+
+def test_pipeline_module_does_not_write_business_tables_directly():
+    repo_root = Path(__file__).resolve().parents[3]
+    checked_files = list((repo_root / "src" / "astock_lifespan_alpha" / "pipeline").rglob("*.py"))
+
+    assert checked_files, "Expected pipeline source files to exist."
+    business_tables = [
+        "malf_wave_scale",
+        "alpha_signal",
+        "position_candidate",
+        "portfolio_plan_snapshot",
+        "trade_order",
+        "system_trade_readout",
+        "system_portfolio_trade_summary",
+    ]
+    write_prefixes = ("INSERT INTO", "UPDATE", "DELETE FROM", "CREATE TABLE")
+    for file_path in checked_files:
+        content = file_path.read_text(encoding="utf-8")
+        upper_content = content.upper()
+        for table_name in business_tables:
+            for prefix in write_prefixes:
+                assert f"{prefix} {table_name.upper()}" not in upper_content
