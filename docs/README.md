@@ -31,9 +31,9 @@ card -> evidence -> record -> conclusion
 11. `docs/02-spec/07-portfolio-plan-minimal-bridge-spec-v1-20260419.md`
 12. `docs/02-spec/08-trade-minimal-execution-ledger-and-runner-spec-v1-20260419.md`
 13. `docs/02-spec/09-portfolio-plan-to-trade-bridge-spec-v1-20260419.md`
-14. `docs/03-execution/README.md`
-15. `docs/03-execution/23-portfolio-plan-to-trade-bridge-spec-freeze-conclusion-20260419.md`
-16. `docs/03-execution/24-stage-five-document-closeout-conclusion-20260419.md`
+14. `docs/02-spec/10-astock-lifespan-alpha-reconstruction-plan-part2-stage-five-trade-v1-20260419.md`
+15. `docs/03-execution/README.md`
+16. `docs/03-execution/25-stage-five-engineering-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -73,14 +73,14 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段四 `position` 接口切换与 `portfolio_plan` 最小桥接，并完成阶段五 `trade` 文档冻结。
+当前仓库已经完成阶段五 `portfolio_plan -> trade` 最小执行主线，并已落档重构计划 Part 2。
 
 这意味着：
 
 - 阶段一到阶段四的实际交付范围都已经进入正式治理闭环
 - `position` 已具备正式规格、独立账本、queue/checkpoint、正式 runner 与三层最小输出
 - `portfolio_plan` 已具备最小三表、最小组合裁决与正式 runner
-- `trade` 已具备最小执行账本与桥接规格，但工程实现尚未开始
+- `trade` 已具备最小执行账本、桥接规格、正式 runner、CLI 入口与测试闭环
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -90,3 +90,8 @@ Stage-five engineering defaults are frozen:
 - `execution_price_line` reads `PathConfig.source_databases.market_base` through the `trade` adapter.
 - `planned_trade_date / execution_trade_date / execution_price` use 次日开盘执行.
 - `accepted` is reserved; the first implementation materializes only `filled / rejected`.
+
+重构计划 Part 2：
+- 文档标识：`reconstruction-plan-part2`
+- 主题：第五阶段文档先行与工程实施计划
+- 裁决：阶段五完成，阶段六 system 待规划/待实施

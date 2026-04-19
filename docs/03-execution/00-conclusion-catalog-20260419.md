@@ -152,3 +152,9 @@ Stage-five implementation freeze addendum:
 - `execution_price_line` uses `PathConfig.source_databases.market_base`.
 - `planned_trade_date / execution_trade_date / execution_price` use 次日开盘执行.
 - `accepted` is reserved but not materialized; the first runner writes `filled / rejected`.
+
+### `25` 阶段五 trade 工程收口
+
+- 结论文件：`docs/03-execution/25-stage-five-engineering-closeout-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段五 `portfolio_plan -> trade` 文档冻结与工程实现均已完成；`reconstruction-plan-part2` 已正式落档，后续可以进入阶段六 `system`。

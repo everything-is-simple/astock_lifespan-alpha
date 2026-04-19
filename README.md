@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段四 `position` 接口切换与 `portfolio_plan` 最小桥接；阶段五 `trade` 文档已冻结，工程待启动。重点是：
+当前已完成阶段五 `portfolio_plan -> trade` 最小执行主线；阶段六 `system` 最小读出与编排层待规划/待实施。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -26,12 +26,14 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - `run_portfolio_plan_build` 与 `portfolio_plan_run / snapshot / run_snapshot` 已落地
 - 阶段四执行闭环 `15-21` 已补齐
 - 阶段五文档闭环 `22-24` 已补齐
+- 阶段五工程收口闭环 `25` 已补齐
+- `run_trade_from_portfolio_plan` 与 `trade_run / work_queue / checkpoint / order_intent / order_execution / run_order_intent` 已落地
 
-这不代表 `trade` 代码、完整资金管理、完整 exit 或 `system` 已实现完成。
+这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `alpha -> position -> portfolio_plan` 最小正式主线已经成立；`portfolio_plan -> trade` 的阶段五文档已经冻结，工程实施待启动。
+> `alpha -> position -> portfolio_plan -> trade` 最小正式主线已经成立；阶段五完成，阶段六 `system` 待规划/待实施。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -44,6 +46,11 @@ Stage-five implementation defaults are now frozen before engineering work:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
 - Valid `open` intents use 次日开盘执行: the first later `market_base_day.open`.
 - The first `trade` runner materializes `filled / rejected`; `accepted` is reserved but not written.
+
+重构计划 Part 2 已正式落档：
+- `docs/02-spec/10-astock-lifespan-alpha-reconstruction-plan-part2-stage-five-trade-v1-20260419.md`
+- 文档标识：`reconstruction-plan-part2`
+- 主题：第五阶段文档先行与工程实施计划
 
 ## 文档入口
 
