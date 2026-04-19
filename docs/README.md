@@ -36,11 +36,13 @@ card -> evidence -> record -> conclusion
 16. `docs/02-spec/12-data-source-fact-contract-alignment-spec-v1-20260419.md`
 17. `docs/02-spec/13-data-to-system-minimal-pipeline-orchestration-spec-v1-20260419.md`
 18. `docs/02-spec/14-real-data-build-rehearsal-spec-v1-20260419.md`
-19. `docs/03-execution/README.md`
-20. `docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
-21. `docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
-22. `docs/03-execution/32-real-data-build-rehearsal-spec-freeze-conclusion-20260419.md`
-23. `docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
+19. `docs/02-spec/15-malf-day-real-data-diagnosis-spec-v1-20260419.md`
+20. `docs/03-execution/README.md`
+21. `docs/03-execution/30-data-to-system-pipeline-orchestration-spec-freeze-conclusion-20260419.md`
+22. `docs/03-execution/31-data-to-system-pipeline-orchestration-engineering-closeout-conclusion-20260419.md`
+23. `docs/03-execution/32-real-data-build-rehearsal-spec-freeze-conclusion-20260419.md`
+24. `docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
+25. `docs/03-execution/34-malf-day-real-data-diagnosis-spec-freeze-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -80,7 +82,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录，当前状态为发现阻塞。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十 MALF day 真实库诊断规格已冻结，当前状态为诊断待实施。
 
 这意味着：
 
@@ -104,6 +106,8 @@ card -> evidence -> record -> conclusion
 - `stage-nine-real-data-build` 已冻结真实 `H:\Lifespan-data` 建库演练边界
 - 阶段九执行收口闭环 `33` 已补齐
 - `run_malf_day_build` 真实库复跑已暴露首个 blocker
+- 阶段十规格冻结闭环 `34` 已补齐
+- `stage-ten-malf-day-diagnosis` 已冻结 MALF day 真实库诊断边界
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -142,3 +146,10 @@ Stage-five engineering defaults are frozen:
 - 主题：真实 `H:\Lifespan-data` module-by-module build 与 pipeline replay
 - 裁决：阶段九真实建库演练发现阻塞，待修复
 - 边界：允许写入 `H:\Lifespan-data\astock_lifespan_alpha`，不删除正式库，`Go+DuckDB deferred`
+
+阶段十 MALF day 真实库诊断规格：
+- 文档标识：`stage-ten-malf-day-diagnosis`
+- 主题：`run_malf_day_build` 真实库卡点诊断与脚本入口修正
+- 裁决：阶段十规格冻结，诊断待实施
+- 诊断表：`stock_daily_adjusted`
+- 边界：只做 `PYTHONPATH` 入口修正与只读诊断，不修改 MALF 业务语义

@@ -206,3 +206,9 @@ Stage-five implementation freeze addendum:
 - 结论文件：`docs/03-execution/33-real-data-build-rehearsal-closeout-conclusion-20260419.md`
 - 裁决：`已记录阻塞`
 - 说明：阶段九真实建库演练 preflight 已通过，但 `PYTHONPATH` 修正后的 `run_malf_day_build` 真实库复跑超过 12 分钟未完成返回，并持续占用 `malf_day.duckdb`；阶段九已发现阻塞，待修复。
+
+### `34` 阶段十 MALF day 真实库诊断规格冻结
+
+- 结论文件：`docs/03-execution/34-malf-day-real-data-diagnosis-spec-freeze-conclusion-20260419.md`
+- 裁决：`已接受`
+- 说明：阶段十 `stage-ten-malf-day-diagnosis` 已冻结，`run_malf_day_build` 真实库卡点诊断、`PYTHONPATH` 入口修正与 `source load timing / engine timing / write timing` 边界已登记；阶段十规格冻结，诊断待实施。

@@ -74,6 +74,7 @@ card -> evidence -> record -> conclusion
 - `31` 阶段八 data -> system pipeline 编排工程收口
 - `32` 阶段九真实建库演练规格冻结
 - `33` 阶段九真实建库演练执行收口
+- `34` 阶段十 MALF day 真实库诊断规格冻结
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -92,3 +93,5 @@ Stage-five implementation defaults are frozen for engineering:
 - 阶段八完成。
 - `stage-nine-real-data-build` 已冻结。
 - 阶段九真实建库演练发现阻塞，待修复。
+- `stage-ten-malf-day-diagnosis` 已冻结。
+- 阶段十诊断待实施。
