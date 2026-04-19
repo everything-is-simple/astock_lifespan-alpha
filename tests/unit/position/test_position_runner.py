@@ -100,6 +100,51 @@ def test_portfolio_plan_runner_bridges_from_position_outputs(monkeypatch, tmp_pa
     assert {"inserted", "reused"}.issubset(actions)
 
 
+def test_portfolio_plan_runner_rematerializes_when_capacity_changes(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_market_base_day(workspace / "data" / "base" / "market_base.duckdb")
+    _write_alpha_signal(workspace / "data" / "astock_lifespan_alpha" / "alpha" / "alpha_signal.duckdb")
+
+    run_position_from_alpha_signal()
+    run_portfolio_plan_build(portfolio_gross_cap_weight=0.15)
+    run_portfolio_plan_build(portfolio_gross_cap_weight=0.08)
+
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"),
+        read_only=True,
+    ) as connection:
+        rematerialized_rows = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM portfolio_plan_run_snapshot
+            WHERE materialization_action = 'rematerialized'
+            """
+        ).fetchone()[0]
+        exhausted_rows = connection.execute(
+            """
+            SELECT candidate_nk, blocking_reason_code
+            FROM portfolio_plan_snapshot
+            WHERE blocking_reason_code = 'portfolio_capacity_exhausted'
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+        trimmed_rows = connection.execute(
+            """
+            SELECT candidate_nk, admitted_weight, trimmed_weight
+            FROM portfolio_plan_snapshot
+            WHERE plan_status = 'trimmed'
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+
+    assert rematerialized_rows >= 1
+    assert exhausted_rows == [
+        ("signal:cpb:1", "portfolio_capacity_exhausted"),
+        ("signal:tst:1", "portfolio_capacity_exhausted"),
+    ]
+    assert trimmed_rows == [("signal:bof:1", 0.08, 0.04)]
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
