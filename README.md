@@ -18,7 +18,7 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 
 ## 当前阶段
 
-当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已发现阻塞，阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已冻结；阶段九重演待在写路径工程结果落地后重新发起。重点是：
+当前已完成阶段八 `data -> system` 最小 pipeline orchestration，阶段九真实建库演练已发现阻塞，阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已完成，阶段十三 MALF day segmented build completion 已完成首轮工程落地；阶段九重演待在阶段十三完成性验证后重新发起。重点是：
 
 - `alpha_signal -> position` 桥接规格、`position` 最小账本规格、`portfolio_plan` 最小桥接规格已冻结
 - `run_position_from_alpha_signal` 已从 foundation stub 升级为正式 runner
@@ -56,12 +56,17 @@ data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 - `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
 - 安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds` 已降到 `0.911749`
 - 真实全量 `run_malf_day_build` 在 60 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
+- 阶段十三规格冻结闭环 `40` 已补齐
+- 阶段十三工程收口闭环 `41` 已补齐
+- `run_malf_day_build` 已支持 `segmented build`、`resume`、`progress sidecar` 与 `abandoned build artifacts` 登记
+- 真实推进顺序固定为 `100 / 500 / 1000 symbol` 分段证明，再进入 full-universe segmented build
+- 阶段九 replay 待阶段十三完成后重新发起
 
 这不代表完整资金管理、完整 exit、真实 broker/session/partial fill 或 `system` 已实现完成。
 
 当前阶段更准确的含义是：
 
-> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九阻塞已定位到真实 MALF day 首步，阶段十二已冻结写路径 unblock 边界，阶段九重演待写路径工程结果落地后重新发起。
+> `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 最小正式主线已经具备统一 pipeline 入口；阶段九阻塞已定位到真实 MALF day 首步，阶段十三已把 day build 改为 `segmented build / resume / progress` 形态，阶段九 replay 待阶段十三完成后重新发起。
 
 阶段五起正式冻结以下价格口径分线：
 
@@ -171,3 +176,17 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 安装 `pyarrow 23.0.1` 后 diagnostics 真实采样窗口 `write_seconds = 0.911749`
 - runner 已避免旧库 index delete fatal，并在旧库遗留 `running` 状态时走 building 库重建
 - 剩余偏差：真实全量 build 仍超过 60 分钟观察窗，阶段九真实重演尚未完成
+
+## 阶段十三更新
+
+阶段十三 `stage-thirteen-malf-day-segmented-build-completion` 已冻结并完成首轮工程落地：
+
+- 新规格：`docs/02-spec/18-stage-thirteen-malf-day-segmented-build-completion-spec-v1-20260419.md`
+- 规格冻结结论：`docs/03-execution/40-stage-thirteen-malf-day-segmented-build-completion-spec-freeze-conclusion-20260419.md`
+- 工程收口结论：`docs/03-execution/41-stage-thirteen-malf-day-segmented-build-completion-engineering-closeout-conclusion-20260419.md`
+- `run_malf_day_build` 已支持 `start_symbol / end_symbol / symbol_limit / resume / progress_path`
+- `progress_summary` 已输出 `symbols_total / symbols_seen / symbols_completed / current_symbol / elapsed_seconds / estimated_remaining_symbols`
+- `artifact_summary` 已输出 `active_build_path / abandoned_build_artifacts / promoted_to_target`
+- 阶段十三只做 segmented build completion，不修改 MALF 语义
+
+当前正式状态为：真实 `100 / 500 / 1000 symbol` 分段证明与 full-universe completion 仍待执行，阶段九 replay 待阶段十三完成后重新发起。

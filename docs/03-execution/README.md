@@ -80,6 +80,8 @@ card -> evidence -> record -> conclusion
 - `37` 阶段十一 MALF day repair 工程收口
 - `38` 阶段十二 MALF day 写路径重演 unblock 规格冻结
 - `39` 阶段十二 MALF day 写路径重演 unblock 工程收口
+- `40` 阶段十三 MALF day segmented build completion 规格冻结
+- `41` 阶段十三 MALF day segmented build completion 工程收口
 
 Stage-five implementation defaults are frozen for engineering:
 - `execution_price_line` is backed by `PathConfig.source_databases.market_base`.
@@ -100,7 +102,8 @@ Stage-five implementation defaults are frozen for engineering:
 - 阶段九真实建库演练发现阻塞，待修复。
 - `stage-ten-malf-day-diagnosis` 已冻结。
 - 阶段十完成。
-- 阶段九重演待重新发起。
+- 阶段十三 segmented build completion 已冻结并完成首轮工程落地。
+- 阶段九 replay 待阶段十三完成后重新发起。
 ## 阶段十一补充
 
 - `36` 阶段十一 MALF day repair 规格冻结
@@ -124,3 +127,13 @@ Stage-five implementation defaults are frozen for engineering:
 - `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
 - 安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds = 0.911749`
 - 当前剩余偏差：真实全量 build 在 60 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
+
+## 阶段十三补充
+
+- `40` 阶段十三 MALF day segmented build completion 规格冻结
+- `41` 阶段十三 MALF day segmented build completion 工程收口
+- `stage-thirteen-malf-day-segmented-build-completion` 已冻结 `segmented build` / `resume` / `progress` / `abandoned build artifacts`
+- `run_malf_day_build` 已支持 `start_symbol / end_symbol / symbol_limit / resume / progress_path`
+- `segment_summary / progress_summary / artifact_summary` 已进入正式 runner 合同
+- 真实推进顺序固定为 `100 / 500 / 1000 symbol` 分段证明，再进入 full-universe segmented build
+- 阶段九 replay 待阶段十三完成后重新发起

@@ -48,6 +48,9 @@ card -> evidence -> record -> conclusion
 28. `docs/02-spec/17-stage-twelve-malf-day-write-path-replay-unblock-spec-v1-20260419.md`
 29. `docs/03-execution/38-stage-twelve-malf-day-write-path-replay-unblock-spec-freeze-conclusion-20260419.md`
 30. `docs/03-execution/39-stage-twelve-malf-day-write-path-replay-unblock-engineering-closeout-conclusion-20260419.md`
+31. `docs/02-spec/18-stage-thirteen-malf-day-segmented-build-completion-spec-v1-20260419.md`
+32. `docs/03-execution/40-stage-thirteen-malf-day-segmented-build-completion-spec-freeze-conclusion-20260419.md`
+33. `docs/03-execution/41-stage-thirteen-malf-day-segmented-build-completion-engineering-closeout-conclusion-20260419.md`
 
 ## 目录职责
 
@@ -87,7 +90,7 @@ card -> evidence -> record -> conclusion
 
 ## 当前状态
 
-当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已冻结，当前状态为写路径工程实施与阶段九重演待重新发起。
+当前仓库已经完成阶段八 `data -> system` 最小 pipeline orchestration，并已完成阶段九真实建库演练首轮执行记录；阶段十一 MALF day repair 已完成，阶段十二 MALF day 写路径重演 unblock 已完成，阶段十三 MALF day segmented build completion 已完成首轮工程落地，当前状态为真实分段完成性验证与阶段九重演待重新发起。
 
 这意味着：
 
@@ -126,6 +129,11 @@ card -> evidence -> record -> conclusion
 - `write_timing_summary` 已进入 MALF runner 与 diagnostics 输出
 - 安装 `pyarrow 23.0.1` 后真实采样窗口 `write_seconds = 0.911749`
 - 真实全量 build 在 60 分钟观察窗内仍未完成，阶段九重演尚未登记为完成
+- 阶段十三规格冻结闭环 `40` 已补齐
+- 阶段十三工程收口闭环 `41` 已补齐
+- `run_malf_day_build` 已支持 `segmented build`、`resume`、`progress` 与 `abandoned build artifacts`
+- 真实 build 推进顺序已固定为 `100 / 500 / 1000 symbol` 分段证明，再进入 full-universe segmented build
+- 阶段九 replay 待阶段十三完成后重新发起
 - 阶段五之后正式冻结价格分线：
   - `malf / alpha` 属于 `analysis_price_line`
   - `portfolio_plan / trade / system` 属于 `execution_price_line`
@@ -207,3 +215,18 @@ Stage-five engineering defaults are frozen:
 - `write_timing` 已拆分为 `delete_old_rows_seconds / insert_ledgers_seconds / checkpoint_seconds / queue_update_seconds`
 - runner 已支持旧真实库 running 状态下的新库重建与旧库 backup promotion
 - 当前正式状态为：阶段十二工程完成但保留真实全量 build 剩余偏差，阶段九重演尚未完成
+
+## 阶段十三补充
+
+- 新规格：`docs/02-spec/18-stage-thirteen-malf-day-segmented-build-completion-spec-v1-20260419.md`
+- 规格冻结结论：`docs/03-execution/40-stage-thirteen-malf-day-segmented-build-completion-spec-freeze-conclusion-20260419.md`
+- 工程收口结论：`docs/03-execution/41-stage-thirteen-malf-day-segmented-build-completion-engineering-closeout-conclusion-20260419.md`
+
+阶段十三正式冻结并实现了以下口径：
+
+- `run_malf_day_build` 支持 `start_symbol / end_symbol / symbol_limit / resume / progress_path`
+- day build 支持 `segmented build` 与 checkpoint-based resume
+- `progress_summary` 与 sidecar progress 已进入正式 runner 输出
+- `artifact_summary` 可登记 active build path 与 abandoned build artifacts
+
+当前正式状态为：阶段十三工程实现已完成，真实 `100 / 500 / 1000 symbol` 分段证明与 full-universe completion 仍待执行，阶段九 replay 待阶段十三完成后重新发起。

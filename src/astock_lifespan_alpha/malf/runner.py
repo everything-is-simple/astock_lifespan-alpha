@@ -62,6 +62,12 @@ class _WriteTimingAccumulator:
     checkpoint_seconds: float = 0.0
     queue_update_seconds: float = 0.0
 
+    def add(self, other: "_WriteTimingAccumulator") -> None:
+        self.delete_old_rows_seconds += other.delete_old_rows_seconds
+        self.insert_ledgers_seconds += other.insert_ledgers_seconds
+        self.checkpoint_seconds += other.checkpoint_seconds
+        self.queue_update_seconds += other.queue_update_seconds
+
     def as_summary(self) -> WriteTimingSummary:
         delete_old_rows_seconds = round(self.delete_old_rows_seconds, 6)
         insert_ledgers_seconds = round(self.insert_ledgers_seconds, 6)
@@ -236,6 +242,16 @@ def _promote_rebuilt_database(*, build_path: Path, target_path: Path, run_id: st
     build_path.replace(target_path)
 
 
+def _prepare_database_path(database_path: Path) -> None:
+    if not database_path.exists():
+        return
+    try:
+        with duckdb.connect(str(database_path)):
+            return
+    except duckdb.Error:
+        database_path.unlink()
+
+
 def _run_malf_build(
     *,
     runner_name: str,
@@ -272,6 +288,7 @@ def _run_malf_build(
         abandoned_build_artifacts=(),
     )
     active_target_path = artifacts.active_target_path
+    _prepare_database_path(active_target_path)
     initialize_malf_schema(active_target_path)
 
     source = None
@@ -757,6 +774,30 @@ def _selected_symbols_checkpointed(
     )
 
 
+def _replace_symbol_rows(*, connection: duckdb.DuckDBPyConnection, timeframe: Timeframe, symbol: str) -> None:
+    _replace_symbol_rows_batch(connection=connection, timeframe=timeframe, symbols=[symbol])
+
+
+def _replace_symbol_rows_batch(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    timeframe: Timeframe,
+    symbols: list[str],
+) -> None:
+    if not symbols:
+        return
+    placeholders = ", ".join(["?"] * len(symbols))
+    params: list[object] = [timeframe.value, *symbols]
+    for table_name in (
+        "malf_pivot_ledger",
+        "malf_wave_ledger",
+        "malf_state_snapshot",
+        "malf_wave_scale_snapshot",
+        "malf_wave_scale_profile",
+    ):
+        connection.execute(f"DELETE FROM {table_name} WHERE timeframe = ? AND symbol IN ({placeholders})", params)
+
+
 def _insert_rows(
     *,
     connection: duckdb.DuckDBPyConnection,
@@ -795,6 +836,15 @@ def _insert_rows(
         f"{insert_keyword} INTO {table_name} ({column_sql}) VALUES ({placeholders})",
         rows,
     )
+
+
+def _insert_result_rows(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    result: EngineResult,
+) -> None:
+    _insert_result_rows_batch(connection=connection, run_id=run_id, results=[result])
 
 
 def _insert_result_rows_batch(
@@ -986,6 +1036,35 @@ def _insert_result_rows_batch(
         ],
         rows=wave_scale_profile_rows,
         replace_existing=replace_existing,
+    )
+
+
+def _upsert_checkpoint(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    timeframe: Timeframe,
+    symbol: str,
+    run_id: str,
+    last_bar_dt: datetime,
+) -> None:
+    _upsert_checkpoints_batch(
+        connection=connection,
+        timeframe=timeframe,
+        run_id=run_id,
+        symbol_results=[
+            _SymbolBuildResult(
+                symbol=symbol,
+                queue_id="",
+                latest_bar_dt=last_bar_dt,
+                queue_status="completed",
+                pivot_rows=0,
+                wave_rows=0,
+                state_snapshot_rows=0,
+                wave_scale_snapshot_rows=0,
+                wave_scale_profile_rows=0,
+                symbol_updated=True,
+            )
+        ],
     )
 
 
