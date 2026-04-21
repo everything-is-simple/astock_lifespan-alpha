@@ -7,7 +7,7 @@ from datetime import date
 from enum import Enum
 
 
-SYSTEM_CONTRACT_VERSION = "stage6_system_v1"
+SYSTEM_CONTRACT_VERSION = "stage6_system_v2"
 
 
 class SystemRunStatus(str, Enum):
@@ -71,13 +71,15 @@ class SystemTradeReadoutRecord:
     """Minimal system-facing projection of trade intent and execution rows."""
 
     system_readout_nk: str
-    order_intent_nk: str
+    order_intent_nk: str | None
     order_execution_nk: str
     portfolio_id: str
     symbol: str
     reference_trade_date: date | None
     planned_trade_date: date | None
     execution_trade_date: date | None
+    trade_action: str
+    position_leg_nk: str | None
     position_action_decision: str
     intent_status: str
     execution_status: str

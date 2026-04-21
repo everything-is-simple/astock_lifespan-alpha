@@ -18,7 +18,7 @@ from astock_lifespan_alpha.portfolio_plan.contracts import (
 from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_plan_schema
 
 
-PORTFOLIO_PLAN_CONTRACT_VERSION = "stage4_portfolio_plan_v1"
+PORTFOLIO_PLAN_CONTRACT_VERSION = "stage4_portfolio_plan_v2"
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class _PortfolioPlanSourceMetadata:
 def run_portfolio_plan_build(
     *,
     portfolio_id: str = "core",
-    portfolio_gross_cap_weight: float = 0.15,
+    portfolio_gross_cap_weight: float = 0.50,
     settings: WorkspaceRoots | None = None,
 ) -> PortfolioPlanRunSummary:
     workspace = settings or default_settings()
@@ -145,6 +145,7 @@ def _attach_position_source_view(*, connection: duckdb.DuckDBPyConnection, sourc
         "position_candidate_audit",
         "position_capacity_snapshot",
         "position_sizing_snapshot",
+        "position_exit_plan",
     }
     if not required_tables.issubset(available_tables):
         return _PortfolioPlanSourceMetadata(position_source_path=source_path, row_count=0, source_available=False)
@@ -159,12 +160,17 @@ def _attach_position_source_view(*, connection: duckdb.DuckDBPyConnection, sourc
             audit.candidate_status,
             audit.blocked_reason_code,
             sizing.position_action_decision,
-            sizing.final_allowed_position_weight
+            sizing.final_allowed_position_weight,
+            sizing.planned_entry_trade_date,
+            exit_plan.planned_exit_trade_date AS scheduled_exit_trade_date,
+            exit_plan.exit_reason_code AS planned_exit_reason_code
         FROM portfolio_position_source.position_candidate_audit AS audit
         INNER JOIN portfolio_position_source.position_capacity_snapshot AS capacity
             ON capacity.candidate_nk = audit.candidate_nk
         INNER JOIN portfolio_position_source.position_sizing_snapshot AS sizing
             ON sizing.candidate_nk = audit.candidate_nk
+        LEFT JOIN portfolio_position_source.position_exit_plan AS exit_plan
+            ON exit_plan.candidate_nk = audit.candidate_nk
         """
     )
     return _PortfolioPlanSourceMetadata(
@@ -206,9 +212,15 @@ def _create_portfolio_plan_source_work_unit_summary(
                         '|',
                         CAST(final_allowed_position_weight AS VARCHAR),
                         '|',
+                        COALESCE(CAST(planned_entry_trade_date AS VARCHAR), ''),
+                        '|',
+                        COALESCE(CAST(scheduled_exit_trade_date AS VARCHAR), ''),
+                        '|',
+                        COALESCE(planned_exit_reason_code, ''),
+                        '|',
                         CAST(? AS VARCHAR)
                     )
-                    ORDER BY reference_trade_date, signal_date, candidate_nk
+                    ORDER BY planned_entry_trade_date, reference_trade_date, signal_date, candidate_nk
                 )
             ) AS source_fingerprint
         FROM portfolio_position_source_rows
@@ -332,74 +344,137 @@ def _materialize_portfolio_plan_sql(
     connection.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE portfolio_plan_materialized AS
-        WITH ordered_rows AS (
+        WITH RECURSIVE ordered_rows AS (
             SELECT
+                ROW_NUMBER() OVER (
+                    ORDER BY planned_entry_trade_date, reference_trade_date, signal_date, candidate_nk
+                ) AS row_number,
                 candidate_nk,
                 symbol,
                 reference_trade_date,
+                planned_entry_trade_date,
+                scheduled_exit_trade_date,
                 signal_date,
                 candidate_status,
                 blocked_reason_code,
+                planned_exit_reason_code,
                 position_action_decision,
-                final_allowed_position_weight AS requested_weight,
-                candidate_status = 'admitted' AND final_allowed_position_weight > 0 AS consumes_capacity
+                ROUND(LEAST(final_allowed_position_weight, 0.15), 4) AS requested_weight
             FROM portfolio_position_source_rows
-        ),
-        capacity_rows AS (
-            SELECT
-                *,
-                SUM(CASE WHEN consumes_capacity THEN requested_weight ELSE 0.0 END) OVER (
-                    ORDER BY reference_trade_date, signal_date, candidate_nk
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS cumulative_requested_weight
-            FROM ordered_rows
         ),
         planned_rows AS (
             SELECT
-                *,
-                CASE
-                    WHEN consumes_capacity THEN cumulative_requested_weight - requested_weight
-                    ELSE cumulative_requested_weight
-                END AS prior_requested_weight
-            FROM capacity_rows
-        ),
-        status_rows AS (
-            SELECT
-                *,
+                row_number,
+                candidate_nk,
+                symbol,
+                reference_trade_date,
+                planned_entry_trade_date,
+                scheduled_exit_trade_date,
+                signal_date,
+                candidate_status,
+                blocked_reason_code,
+                planned_exit_reason_code,
+                position_action_decision,
+                requested_weight,
+                CAST(0.0 AS DOUBLE) AS current_portfolio_gross_weight,
                 CASE
                     WHEN candidate_status != 'admitted' THEN 'blocked'
                     WHEN requested_weight <= 0 THEN 'blocked'
-                    WHEN {portfolio_gross_cap_weight} - prior_requested_weight >= requested_weight THEN 'admitted'
-                    WHEN {portfolio_gross_cap_weight} - prior_requested_weight > 0 THEN 'trimmed'
+                    WHEN planned_entry_trade_date IS NULL THEN 'blocked'
+                    WHEN {portfolio_gross_cap_weight} >= requested_weight THEN 'admitted'
+                    WHEN {portfolio_gross_cap_weight} > 0 THEN 'trimmed'
                     ELSE 'blocked'
                 END AS plan_status,
                 CASE
                     WHEN candidate_status != 'admitted' THEN COALESCE(blocked_reason_code, 'candidate_blocked')
                     WHEN requested_weight <= 0 THEN 'no_position_capacity'
-                    WHEN {portfolio_gross_cap_weight} - prior_requested_weight >= requested_weight THEN NULL
-                    WHEN {portfolio_gross_cap_weight} - prior_requested_weight > 0 THEN 'portfolio_capacity_trimmed'
+                    WHEN planned_entry_trade_date IS NULL THEN 'missing_next_execution_trade_date'
+                    WHEN {portfolio_gross_cap_weight} >= requested_weight THEN NULL
+                    WHEN {portfolio_gross_cap_weight} > 0 THEN 'portfolio_capacity_trimmed'
                     ELSE 'portfolio_capacity_exhausted'
                 END AS plan_blocking_reason_code,
                 CASE
-                    WHEN candidate_status = 'admitted'
-                        AND requested_weight > 0
-                        AND {portfolio_gross_cap_weight} - prior_requested_weight >= requested_weight
-                        THEN requested_weight
-                    WHEN candidate_status = 'admitted'
-                        AND requested_weight > 0
-                        AND {portfolio_gross_cap_weight} - prior_requested_weight > 0
-                        THEN ROUND({portfolio_gross_cap_weight} - prior_requested_weight, 4)
+                    WHEN candidate_status = 'admitted' AND requested_weight > 0 AND planned_entry_trade_date IS NOT NULL
+                        THEN ROUND(LEAST(requested_weight, {portfolio_gross_cap_weight}), 4)
                     ELSE 0.0
                 END AS admitted_weight
-            FROM planned_rows
+            FROM ordered_rows
+            WHERE row_number = 1
+
+            UNION ALL
+
+            SELECT
+                next_row.row_number,
+                next_row.candidate_nk,
+                next_row.symbol,
+                next_row.reference_trade_date,
+                next_row.planned_entry_trade_date,
+                next_row.scheduled_exit_trade_date,
+                next_row.signal_date,
+                next_row.candidate_status,
+                next_row.blocked_reason_code,
+                next_row.planned_exit_reason_code,
+                next_row.position_action_decision,
+                next_row.requested_weight,
+                active_positions.current_portfolio_gross_weight,
+                CASE
+                    WHEN next_row.candidate_status != 'admitted' THEN 'blocked'
+                    WHEN next_row.requested_weight <= 0 THEN 'blocked'
+                    WHEN next_row.planned_entry_trade_date IS NULL THEN 'blocked'
+                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight >= next_row.requested_weight THEN 'admitted'
+                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight > 0 THEN 'trimmed'
+                    ELSE 'blocked'
+                END AS plan_status,
+                CASE
+                    WHEN next_row.candidate_status != 'admitted' THEN COALESCE(next_row.blocked_reason_code, 'candidate_blocked')
+                    WHEN next_row.requested_weight <= 0 THEN 'no_position_capacity'
+                    WHEN next_row.planned_entry_trade_date IS NULL THEN 'missing_next_execution_trade_date'
+                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight >= next_row.requested_weight THEN NULL
+                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight > 0 THEN 'portfolio_capacity_trimmed'
+                    ELSE 'portfolio_capacity_exhausted'
+                END AS plan_blocking_reason_code,
+                CASE
+                    WHEN next_row.candidate_status = 'admitted'
+                        AND next_row.requested_weight > 0
+                        AND next_row.planned_entry_trade_date IS NOT NULL
+                        AND {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight >= next_row.requested_weight
+                        THEN ROUND(next_row.requested_weight, 4)
+                    WHEN next_row.candidate_status = 'admitted'
+                        AND next_row.requested_weight > 0
+                        AND next_row.planned_entry_trade_date IS NOT NULL
+                        AND {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight > 0
+                        THEN ROUND({portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight, 4)
+                    ELSE 0.0
+                END AS admitted_weight
+            FROM planned_rows AS prior_row
+            INNER JOIN ordered_rows AS next_row
+                ON next_row.row_number = prior_row.row_number + 1
+            CROSS JOIN LATERAL (
+                SELECT
+                    COALESCE(SUM(previous.admitted_weight), 0.0) AS current_portfolio_gross_weight
+                FROM planned_rows AS previous
+                WHERE previous.row_number < next_row.row_number
+                    AND previous.admitted_weight > 0
+                    AND next_row.planned_entry_trade_date IS NOT NULL
+                    AND (
+                        previous.scheduled_exit_trade_date IS NULL
+                        OR previous.scheduled_exit_trade_date > next_row.planned_entry_trade_date
+                    )
+            ) AS active_positions
         ),
         weighted_rows AS (
             SELECT
                 *,
-                CASE WHEN plan_status = 'trimmed' THEN ROUND(requested_weight - admitted_weight, 4) ELSE 0.0 END AS trimmed_weight,
-                ROUND(LEAST({portfolio_gross_cap_weight}, cumulative_requested_weight), 4) AS portfolio_gross_used_weight,
-                ROUND(GREATEST({portfolio_gross_cap_weight} - cumulative_requested_weight, 0.0), 4) AS portfolio_gross_remaining_weight
-            FROM status_rows
+                CASE
+                    WHEN plan_status = 'trimmed' THEN ROUND(requested_weight - admitted_weight, 4)
+                    ELSE 0.0
+                END AS trimmed_weight,
+                ROUND(current_portfolio_gross_weight + admitted_weight, 4) AS portfolio_gross_used_weight,
+                ROUND(
+                    GREATEST({portfolio_gross_cap_weight} - (current_portfolio_gross_weight + admitted_weight), 0.0),
+                    4
+                ) AS remaining_portfolio_capacity_weight
+            FROM planned_rows
         )
         SELECT
             CONCAT(
@@ -415,15 +490,20 @@ def _materialize_portfolio_plan_sql(
             ? AS portfolio_id,
             symbol,
             reference_trade_date,
+            planned_entry_trade_date,
+            scheduled_exit_trade_date,
             position_action_decision,
             requested_weight,
             admitted_weight,
             trimmed_weight,
             plan_status,
             plan_blocking_reason_code AS blocking_reason_code,
+            planned_exit_reason_code,
             {portfolio_gross_cap_weight} AS portfolio_gross_cap_weight,
+            current_portfolio_gross_weight,
+            remaining_portfolio_capacity_weight,
             portfolio_gross_used_weight,
-            portfolio_gross_remaining_weight,
+            remaining_portfolio_capacity_weight AS portfolio_gross_remaining_weight,
             ? AS portfolio_plan_contract_version
         FROM weighted_rows
         """,
@@ -438,11 +518,16 @@ def _materialize_portfolio_plan_sql(
             CASE
                 WHEN existing.plan_snapshot_nk IS NULL THEN 'inserted'
                 WHEN existing.plan_status = materialized.plan_status
+                    AND existing.planned_entry_trade_date IS NOT DISTINCT FROM materialized.planned_entry_trade_date
+                    AND existing.scheduled_exit_trade_date IS NOT DISTINCT FROM materialized.scheduled_exit_trade_date
                     AND existing.position_action_decision = materialized.position_action_decision
                     AND existing.requested_weight = materialized.requested_weight
                     AND existing.admitted_weight = materialized.admitted_weight
                     AND existing.trimmed_weight = materialized.trimmed_weight
                     AND existing.blocking_reason_code IS NOT DISTINCT FROM materialized.blocking_reason_code
+                    AND existing.planned_exit_reason_code IS NOT DISTINCT FROM materialized.planned_exit_reason_code
+                    AND existing.current_portfolio_gross_weight = materialized.current_portfolio_gross_weight
+                    AND existing.remaining_portfolio_capacity_weight = materialized.remaining_portfolio_capacity_weight
                     AND existing.portfolio_gross_used_weight = materialized.portfolio_gross_used_weight
                     AND existing.portfolio_gross_remaining_weight = materialized.portfolio_gross_remaining_weight
                     THEN 'reused'
@@ -460,9 +545,11 @@ def _materialize_portfolio_plan_sql(
             """
             INSERT INTO portfolio_plan_snapshot (
                 plan_snapshot_nk, candidate_nk, portfolio_id, symbol, reference_trade_date,
-                position_action_decision, requested_weight, admitted_weight, trimmed_weight,
-                plan_status, blocking_reason_code, portfolio_gross_cap_weight,
-                portfolio_gross_used_weight, portfolio_gross_remaining_weight,
+                planned_entry_trade_date, scheduled_exit_trade_date, position_action_decision,
+                requested_weight, admitted_weight, trimmed_weight,
+                plan_status, blocking_reason_code, planned_exit_reason_code,
+                portfolio_gross_cap_weight, current_portfolio_gross_weight,
+                remaining_portfolio_capacity_weight, portfolio_gross_used_weight, portfolio_gross_remaining_weight,
                 portfolio_plan_contract_version, first_seen_run_id, last_materialized_run_id
             )
             SELECT
@@ -471,13 +558,18 @@ def _materialize_portfolio_plan_sql(
                 portfolio_id,
                 symbol,
                 reference_trade_date,
+                planned_entry_trade_date,
+                scheduled_exit_trade_date,
                 position_action_decision,
                 requested_weight,
                 admitted_weight,
                 trimmed_weight,
                 plan_status,
                 blocking_reason_code,
+                planned_exit_reason_code,
                 portfolio_gross_cap_weight,
+                current_portfolio_gross_weight,
+                remaining_portfolio_capacity_weight,
                 portfolio_gross_used_weight,
                 portfolio_gross_remaining_weight,
                 portfolio_plan_contract_version,

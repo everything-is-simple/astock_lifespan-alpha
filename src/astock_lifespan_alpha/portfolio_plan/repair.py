@@ -57,6 +57,10 @@ def repair_portfolio_plan_schema(*, settings: WorkspaceRoots | None = None) -> P
                                 '|',
                                 COALESCE(CAST(snapshot.reference_trade_date AS VARCHAR), ''),
                                 '|',
+                                COALESCE(CAST(snapshot.planned_entry_trade_date AS VARCHAR), ''),
+                                '|',
+                                COALESCE(CAST(snapshot.scheduled_exit_trade_date AS VARCHAR), ''),
+                                '|',
                                 snapshot.position_action_decision,
                                 '|',
                                 CAST(snapshot.requested_weight AS VARCHAR),
@@ -69,9 +73,15 @@ def repair_portfolio_plan_schema(*, settings: WorkspaceRoots | None = None) -> P
                                 '|',
                                 COALESCE(snapshot.blocking_reason_code, ''),
                                 '|',
-                                CAST(snapshot.portfolio_gross_cap_weight AS VARCHAR)
+                                COALESCE(snapshot.planned_exit_reason_code, ''),
+                                '|',
+                                CAST(snapshot.portfolio_gross_cap_weight AS VARCHAR),
+                                '|',
+                                CAST(snapshot.current_portfolio_gross_weight AS VARCHAR),
+                                '|',
+                                CAST(snapshot.remaining_portfolio_capacity_weight AS VARCHAR)
                             )
-                            ORDER BY snapshot.reference_trade_date, snapshot.candidate_nk, snapshot.plan_snapshot_nk
+                            ORDER BY snapshot.planned_entry_trade_date, snapshot.reference_trade_date, snapshot.candidate_nk, snapshot.plan_snapshot_nk
                         )
                     ),
                     MAX(snapshot.last_materialized_run_id),

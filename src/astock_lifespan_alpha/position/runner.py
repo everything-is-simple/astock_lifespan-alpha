@@ -39,7 +39,13 @@ def run_position_from_alpha_signal(*, settings: WorkspaceRoots | None = None) ->
 
     run_id = f"position-{uuid4().hex[:12]}"
     message = "position run completed."
-    counts = {"candidate_rows": 0, "capacity_rows": 0, "sizing_rows": 0}
+    counts = {
+        "candidate_rows": 0,
+        "capacity_rows": 0,
+        "sizing_rows": 0,
+        "exit_plan_rows": 0,
+        "exit_leg_rows": 0,
+    }
     symbols_updated = 0
     latest_signal_date: date | None = None
 
@@ -77,6 +83,8 @@ def run_position_from_alpha_signal(*, settings: WorkspaceRoots | None = None) ->
                 inserted_candidates = ?,
                 inserted_capacity_rows = ?,
                 inserted_sizing_rows = ?,
+                inserted_exit_plan_rows = ?,
+                inserted_exit_leg_rows = ?,
                 latest_signal_date = ?,
                 message = ?,
                 finished_at = CURRENT_TIMESTAMP
@@ -88,6 +96,8 @@ def run_position_from_alpha_signal(*, settings: WorkspaceRoots | None = None) ->
                 counts["candidate_rows"],
                 counts["capacity_rows"],
                 counts["sizing_rows"],
+                counts["exit_plan_rows"],
+                counts["exit_leg_rows"],
                 latest_signal_date,
                 message,
                 run_id,
@@ -301,7 +311,13 @@ def _materialize_position_sql(
         """,
         [run_id],
     )
-    for table_name in ("position_candidate_audit", "position_capacity_snapshot", "position_sizing_snapshot"):
+    for table_name in (
+        "position_candidate_audit",
+        "position_capacity_snapshot",
+        "position_sizing_snapshot",
+        "position_exit_plan",
+        "position_exit_leg",
+    ):
         connection.execute(
             f"""
             DELETE FROM {table_name}
@@ -313,7 +329,11 @@ def _materialize_position_sql(
         CREATE OR REPLACE TEMP TABLE position_evaluation_rows AS
         SELECT
             *,
-            CASE WHEN candidate_status = 'admitted' THEN requested_weight ELSE 0.0 END AS final_allowed_position_weight
+            entry_reference.trade_date AS planned_entry_trade_date,
+            CASE
+                WHEN candidate_status = 'admitted' THEN ROUND(LEAST(requested_weight, 0.15), 4)
+                ELSE 0.0
+            END AS final_allowed_position_weight
         FROM (
             SELECT
                 *,
@@ -349,7 +369,10 @@ def _materialize_position_sql(
                 INNER JOIN position_symbols_to_update updates
                     ON updates.symbol = source.symbol
             )
-        )
+        ) AS evaluated
+        ASOF LEFT JOIN position_market_reference AS entry_reference
+            ON entry_reference.symbol = evaluated.symbol
+            AND evaluated.reference_trade_date < entry_reference.trade_date
         """
     )
     connection.execute(
@@ -411,7 +434,7 @@ def _materialize_position_sql(
         INSERT INTO position_sizing_snapshot (
             sizing_nk, run_id, candidate_nk, symbol, signal_date, policy_id, position_action_decision,
             requested_weight, final_allowed_position_weight, required_reduction_weight, candidate_status,
-            reference_trade_date, reference_price
+            reference_trade_date, reference_price, planned_entry_trade_date
         )
         SELECT
             CONCAT(signal_nk, ':sizing'),
@@ -426,10 +449,105 @@ def _materialize_position_sql(
             0.0,
             candidate_status,
             reference_trade_date,
-            reference_price
+            reference_price,
+            planned_entry_trade_date
         FROM position_evaluation_rows
         """,
         [run_id, STAGE_FOUR_POLICY_ID],
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE position_exit_trigger_candidates AS
+        WITH future_triggers AS (
+            SELECT
+                entry.signal_nk AS candidate_nk,
+                entry.symbol,
+                entry.signal_date AS entry_signal_date,
+                trigger.signal_nk AS exit_trigger_signal_nk,
+                trigger.signal_date AS exit_signal_date,
+                CASE
+                    WHEN trigger.direction != 'up' THEN 'direction_not_long_exit'
+                    WHEN trigger.formal_signal_status != 'confirmed' THEN 'signal_not_confirmed_exit'
+                    WHEN trigger.wave_position_zone = 'weak_stagnation' THEN 'weak_wave_position_exit'
+                    WHEN trigger.no_new_span >= 2 THEN 'time_stop_no_new_span_exit'
+                    ELSE NULL
+                END AS exit_reason_code,
+                ROW_NUMBER() OVER (
+                    PARTITION BY entry.signal_nk
+                    ORDER BY trigger.signal_date, trigger.signal_nk
+                ) AS trigger_rank
+            FROM position_evaluation_rows AS entry
+            INNER JOIN position_evaluation_rows AS trigger
+                ON trigger.symbol = entry.symbol
+                AND trigger.signal_date > entry.signal_date
+            WHERE entry.final_allowed_position_weight > 0
+                AND (
+                    trigger.direction != 'up'
+                    OR trigger.formal_signal_status != 'confirmed'
+                    OR trigger.wave_position_zone = 'weak_stagnation'
+                    OR trigger.no_new_span >= 2
+                )
+        )
+        SELECT
+            trigger.*,
+            exit_reference.trade_date AS planned_exit_trade_date,
+            exit_reference.open_price AS planned_exit_reference_price
+        FROM (
+            SELECT *
+            FROM future_triggers
+            WHERE trigger_rank = 1
+        ) AS trigger
+        ASOF LEFT JOIN (
+            SELECT symbol, trade_date, CAST(close AS DOUBLE) AS open_price
+            FROM position_market_reference
+        ) AS exit_reference
+            ON exit_reference.symbol = trigger.symbol
+            AND trigger.exit_signal_date < exit_reference.trade_date
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO position_exit_plan (
+            exit_plan_nk, run_id, candidate_nk, symbol, entry_signal_date, exit_trigger_signal_nk,
+            exit_signal_date, exit_reason_code, exit_plan_status, planned_exit_trade_date,
+            planned_exit_reference_price
+        )
+        SELECT
+            CONCAT(candidate_nk, ':exit-plan'),
+            ?,
+            candidate_nk,
+            symbol,
+            entry_signal_date,
+            exit_trigger_signal_nk,
+            exit_signal_date,
+            exit_reason_code,
+            'planned',
+            planned_exit_trade_date,
+            planned_exit_reference_price
+        FROM position_exit_trigger_candidates
+        """,
+        [run_id],
+    )
+    connection.execute(
+        """
+        INSERT INTO position_exit_leg (
+            exit_leg_nk, run_id, exit_plan_nk, candidate_nk, symbol, planned_exit_trade_date,
+            exit_action_decision, exit_plan_status, exit_reason_code, planned_exit_reference_price
+        )
+        SELECT
+            CONCAT(candidate_nk, ':exit-leg'),
+            ?,
+            CONCAT(candidate_nk, ':exit-plan'),
+            candidate_nk,
+            symbol,
+            planned_exit_trade_date,
+            'full_exit',
+            'planned',
+            exit_reason_code,
+            planned_exit_reference_price
+        FROM position_exit_trigger_candidates
+        """,
+        [run_id],
     )
     connection.execute(
         """
@@ -456,12 +574,22 @@ def _materialize_position_sql(
         "SELECT COUNT(*) FROM position_sizing_snapshot WHERE run_id = ?",
         [run_id],
     ).fetchone()[0]
+    exit_plan_rows = connection.execute(
+        "SELECT COUNT(*) FROM position_exit_plan WHERE run_id = ?",
+        [run_id],
+    ).fetchone()[0]
+    exit_leg_rows = connection.execute(
+        "SELECT COUNT(*) FROM position_exit_leg WHERE run_id = ?",
+        [run_id],
+    ).fetchone()[0]
     symbols_updated = connection.execute("SELECT COUNT(*) FROM position_symbols_to_update").fetchone()[0]
     return (
         {
             "candidate_rows": int(candidate_rows),
             "capacity_rows": int(capacity_rows),
             "sizing_rows": int(sizing_rows),
+            "exit_plan_rows": int(exit_plan_rows),
+            "exit_leg_rows": int(exit_leg_rows),
         },
         int(symbols_updated),
         latest_signal_date,

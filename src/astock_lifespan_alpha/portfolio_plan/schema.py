@@ -73,13 +73,18 @@ def initialize_portfolio_plan_schema(database_path: Path) -> None:
                 portfolio_id TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 reference_trade_date DATE,
+                planned_entry_trade_date DATE,
+                scheduled_exit_trade_date DATE,
                 position_action_decision TEXT NOT NULL,
                 requested_weight DOUBLE NOT NULL,
                 admitted_weight DOUBLE NOT NULL,
                 trimmed_weight DOUBLE NOT NULL,
                 plan_status TEXT NOT NULL,
                 blocking_reason_code TEXT,
+                planned_exit_reason_code TEXT,
                 portfolio_gross_cap_weight DOUBLE NOT NULL,
+                current_portfolio_gross_weight DOUBLE NOT NULL DEFAULT 0,
+                remaining_portfolio_capacity_weight DOUBLE NOT NULL DEFAULT 0,
                 portfolio_gross_used_weight DOUBLE NOT NULL,
                 portfolio_gross_remaining_weight DOUBLE NOT NULL,
                 portfolio_plan_contract_version TEXT NOT NULL,
@@ -102,6 +107,21 @@ def initialize_portfolio_plan_schema(database_path: Path) -> None:
                 PRIMARY KEY (run_id, plan_snapshot_nk)
             )
             """
+        )
+        connection.execute(
+            "ALTER TABLE portfolio_plan_snapshot ADD COLUMN IF NOT EXISTS planned_entry_trade_date DATE"
+        )
+        connection.execute(
+            "ALTER TABLE portfolio_plan_snapshot ADD COLUMN IF NOT EXISTS scheduled_exit_trade_date DATE"
+        )
+        connection.execute(
+            "ALTER TABLE portfolio_plan_snapshot ADD COLUMN IF NOT EXISTS planned_exit_reason_code TEXT"
+        )
+        connection.execute(
+            "ALTER TABLE portfolio_plan_snapshot ADD COLUMN IF NOT EXISTS current_portfolio_gross_weight DOUBLE DEFAULT 0"
+        )
+        connection.execute(
+            "ALTER TABLE portfolio_plan_snapshot ADD COLUMN IF NOT EXISTS remaining_portfolio_capacity_weight DOUBLE DEFAULT 0"
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_portfolio_plan_snapshot_portfolio ON portfolio_plan_snapshot(portfolio_id, reference_trade_date)"

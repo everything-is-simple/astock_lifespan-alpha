@@ -55,6 +55,10 @@ card -> evidence -> record -> conclusion
 35. `docs/03-execution/42-stage-fourteen-malf-day-real-segmented-proof-and-stage-nine-replay-restart-conclusion-20260419.md`
 36. `docs/02-spec/20-stage-fifteen-malf-day-schema-backfill-compatibility-spec-v1-20260419.md`
 37. `docs/03-execution/43-stage-fifteen-malf-day-schema-backfill-compatibility-conclusion-20260419.md`
+38. `docs/02-spec/21-stage-sixteen-portfolio-plan-system-pipeline-incremental-resume-spec-v1-20260421.md`
+39. `docs/03-execution/45-stage-sixteen-incremental-resume-spec-freeze-conclusion-20260421.md`
+40. `docs/03-execution/46-stage-sixteen-incremental-resume-engineering-closeout-conclusion-20260421.md`
+41. `docs/02-spec/22-stage-seventeen-rolling-backtest-minimal-v1-spec-20260421.md`
 
 ## 目录职责
 
@@ -249,3 +253,13 @@ Stage-five engineering defaults are frozen:
 
 - `stage-sixteen-incremental-resume` 已完成
 - `portfolio_plan / system / pipeline` 已完成正式增量与自动续跑工程收口
+
+## 阶段十七补充
+
+- 新规格：`docs/02-spec/22-stage-seventeen-rolling-backtest-minimal-v1-spec-20260421.md`
+- 正式主题：`alpha -> position -> portfolio_plan -> trade -> system` 的 Rolling Backtest Minimal V1
+- 裁决：
+  - `position` 新增 full-exit plan，但不扩 `alpha_signal` 契约
+  - `portfolio_plan` 默认总仓上限提升到 `0.50`
+  - `trade` 从 open-only 扩到 `open + carry + full-exit`
+  - `system` 继续保持 readout-only

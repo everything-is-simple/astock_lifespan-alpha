@@ -73,7 +73,8 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
         ).fetchall()
         summary_row = connection.execute(
             """
-            SELECT portfolio_id, execution_count, filled_count, rejected_count,
+            SELECT portfolio_id, open_entry_count, full_exit_count, active_symbol_count,
+                   execution_count, filled_count, rejected_count,
                    symbol_count, gross_executed_weight, latest_execution_trade_date,
                    system_contract_version
             FROM system_portfolio_trade_summary
@@ -81,7 +82,7 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
         ).fetchone()
 
     assert readout == [
-        ("intent:filled", "execution:filled", "core", "AAA", "filled", 0.10, None, "stage6_system_v1"),
+        ("intent:filled", "execution:filled", "core", "AAA", "filled", 0.10, None, "stage6_system_v2"),
         (
             "intent:rejected",
             "execution:rejected",
@@ -90,10 +91,10 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
             "rejected",
             0.0,
             "missing_execution_open_price",
-            "stage6_system_v1",
+            "stage6_system_v2",
         ),
     ]
-    assert summary_row == ("core", 2, 1, 1, 2, 0.10, date(2026, 1, 4), "stage6_system_v1")
+    assert summary_row == ("core", 1, 0, 1, 2, 1, 1, 2, 0.10, date(2026, 1, 4), "stage6_system_v2")
 
 
 def test_system_runner_handles_missing_trade_database(monkeypatch, tmp_path):
@@ -252,6 +253,60 @@ def test_repair_system_schema_is_idempotent(monkeypatch, tmp_path):
     assert checkpoint_rows == [("core", "AAA")]
 
 
+def test_system_runner_includes_full_exit_and_active_symbol_summary(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    trade_path = workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"
+    _write_trade_rows(
+        trade_path,
+        [
+            _trade_row(
+                order_intent_nk="intent:open",
+                order_execution_nk="execution:open",
+                symbol="AAA",
+                execution_status="filled",
+                executed_weight=0.10,
+                blocking_reason_code=None,
+            ),
+            _trade_row(
+                order_intent_nk="intent:closed",
+                order_execution_nk="execution:closed-entry",
+                symbol="BBB",
+                execution_status="filled",
+                executed_weight=0.08,
+                blocking_reason_code=None,
+                include_exit=True,
+                exit_execution_nk="exit:closed",
+                exit_trade_date=date(2026, 1, 5),
+                exit_execution_price=20.7,
+                exit_reason_code="time_stop_no_new_span_exit",
+            ),
+        ],
+    )
+
+    run_system_from_trade()
+
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "system" / "system.duckdb"),
+        read_only=True,
+    ) as connection:
+        action_rows = connection.execute(
+            """
+            SELECT trade_action, execution_status
+            FROM system_trade_readout
+            ORDER BY execution_trade_date, trade_action, order_execution_nk
+            """
+        ).fetchall()
+        summary_row = connection.execute(
+            """
+            SELECT open_entry_count, full_exit_count, active_symbol_count, execution_count
+            FROM system_portfolio_trade_summary
+            """
+        ).fetchone()
+
+    assert action_rows == [("open_entry", "filled"), ("open_entry", "filled"), ("full_exit", "filled")]
+    assert summary_row == (2, 1, 1, 3)
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
@@ -267,6 +322,9 @@ def _write_trade_rows(database_path: Path, rows: list[dict[str, object]]) -> Non
     database_path.parent.mkdir(parents=True, exist_ok=True)
     initialize_trade_schema(database_path)
     with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DELETE FROM trade_exit_execution")
+        connection.execute("DELETE FROM trade_carry_snapshot")
+        connection.execute("DELETE FROM trade_position_leg")
         connection.execute("DELETE FROM trade_order_execution")
         connection.execute("DELETE FROM trade_order_intent")
         for row in rows:
@@ -324,6 +382,108 @@ def _write_trade_rows(database_path: Path, rows: list[dict[str, object]]) -> Non
                     "trade-run-1",
                 ],
             )
+            if row["execution_status"] == "filled":
+                position_leg_nk = row["position_leg_nk"]
+                position_state = "closed" if row["include_exit"] else "open"
+                active_weight = 0.0 if row["include_exit"] else row["executed_weight"]
+                connection.execute(
+                    """
+                    INSERT INTO trade_position_leg (
+                        position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
+                        entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
+                        scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
+                        exit_execution_price, active_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        position_leg_nk,
+                        row["candidate_nk"],
+                        row["order_intent_nk"],
+                        row["portfolio_id"],
+                        row["symbol"],
+                        row["reference_trade_date"],
+                        row["execution_trade_date"],
+                        row["execution_price"],
+                        row["executed_weight"],
+                        row["exit_trade_date"],
+                        position_state,
+                        row["exit_execution_nk"],
+                        row["exit_trade_date"],
+                        row["exit_execution_price"],
+                        active_weight,
+                        "stage5_trade_v2",
+                        "trade-run-1",
+                        "trade-run-1",
+                    ],
+                )
+                connection.execute(
+                    """
+                    INSERT INTO trade_carry_snapshot (
+                        carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+                        carry_status, carried_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        f"{position_leg_nk}:open",
+                        position_leg_nk,
+                        row["portfolio_id"],
+                        row["symbol"],
+                        row["execution_trade_date"],
+                        "open",
+                        row["executed_weight"],
+                        "stage5_trade_v2",
+                        "trade-run-1",
+                        "trade-run-1",
+                    ],
+                )
+                if row["include_exit"]:
+                    connection.execute(
+                        """
+                        INSERT INTO trade_exit_execution (
+                            exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
+                            exit_trade_date, execution_status, execution_price, exited_weight,
+                            blocking_reason_code, exit_reason_code, source_price_line,
+                            trade_contract_version, first_seen_run_id, last_materialized_run_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            row["exit_execution_nk"],
+                            position_leg_nk,
+                            row["candidate_nk"],
+                            row["portfolio_id"],
+                            row["symbol"],
+                            row["exit_trade_date"],
+                            "filled",
+                            row["exit_execution_price"],
+                            row["executed_weight"],
+                            None,
+                            row["exit_reason_code"],
+                            "execution_price_line",
+                            "stage5_trade_v2",
+                            "trade-run-1",
+                            "trade-run-1",
+                        ],
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO trade_carry_snapshot (
+                            carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+                            carry_status, carried_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            f"{position_leg_nk}:close",
+                            position_leg_nk,
+                            row["portfolio_id"],
+                            row["symbol"],
+                            row["exit_trade_date"],
+                            "closed",
+                            0.0,
+                            "stage5_trade_v2",
+                            "trade-run-1",
+                            "trade-run-1",
+                        ],
+                    )
 
 
 def _trade_row(
@@ -334,12 +494,18 @@ def _trade_row(
     execution_status: str,
     executed_weight: float,
     blocking_reason_code: str | None,
+    include_exit: bool = False,
+    exit_execution_nk: str | None = None,
+    exit_trade_date: date | None = None,
+    exit_execution_price: float | None = None,
+    exit_reason_code: str | None = None,
 ) -> dict[str, object]:
     return {
         "order_intent_nk": order_intent_nk,
         "order_execution_nk": order_execution_nk,
         "plan_snapshot_nk": f"plan:{symbol}",
         "candidate_nk": f"candidate:{symbol}",
+        "position_leg_nk": f"leg:{symbol}",
         "portfolio_id": "core",
         "symbol": symbol,
         "reference_trade_date": date(2026, 1, 3),
@@ -355,4 +521,9 @@ def _trade_row(
         "execution_price": 11.1 if execution_status == "filled" else None,
         "executed_weight": executed_weight,
         "execution_blocking_reason_code": blocking_reason_code,
+        "include_exit": include_exit,
+        "exit_execution_nk": exit_execution_nk,
+        "exit_trade_date": exit_trade_date,
+        "exit_execution_price": exit_execution_price,
+        "exit_reason_code": exit_reason_code,
     }

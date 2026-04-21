@@ -14,6 +14,8 @@ POSITION_TABLES = (
     "position_candidate_audit",
     "position_capacity_snapshot",
     "position_sizing_snapshot",
+    "position_exit_plan",
+    "position_exit_leg",
 )
 
 
@@ -35,6 +37,8 @@ def initialize_position_schema(database_path: Path) -> None:
                 inserted_candidates BIGINT NOT NULL DEFAULT 0,
                 inserted_capacity_rows BIGINT NOT NULL DEFAULT 0,
                 inserted_sizing_rows BIGINT NOT NULL DEFAULT 0,
+                inserted_exit_plan_rows BIGINT NOT NULL DEFAULT 0,
+                inserted_exit_leg_rows BIGINT NOT NULL DEFAULT 0,
                 latest_signal_date DATE,
                 message TEXT,
                 started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -123,13 +127,55 @@ def initialize_position_schema(database_path: Path) -> None:
                 required_reduction_weight DOUBLE NOT NULL,
                 candidate_status TEXT NOT NULL,
                 reference_trade_date DATE,
-                reference_price DOUBLE
+                reference_price DOUBLE,
+                planned_entry_trade_date DATE
             )
             """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS position_exit_plan (
+                exit_plan_nk TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                candidate_nk TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                entry_signal_date DATE NOT NULL,
+                exit_trigger_signal_nk TEXT NOT NULL,
+                exit_signal_date DATE NOT NULL,
+                exit_reason_code TEXT NOT NULL,
+                exit_plan_status TEXT NOT NULL,
+                planned_exit_trade_date DATE,
+                planned_exit_reference_price DOUBLE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS position_exit_leg (
+                exit_leg_nk TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                exit_plan_nk TEXT NOT NULL,
+                candidate_nk TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                planned_exit_trade_date DATE,
+                exit_action_decision TEXT NOT NULL,
+                exit_plan_status TEXT NOT NULL,
+                exit_reason_code TEXT NOT NULL,
+                planned_exit_reference_price DOUBLE
+            )
+            """
+        )
+        connection.execute("ALTER TABLE position_run ADD COLUMN IF NOT EXISTS inserted_exit_plan_rows BIGINT DEFAULT 0")
+        connection.execute("ALTER TABLE position_run ADD COLUMN IF NOT EXISTS inserted_exit_leg_rows BIGINT DEFAULT 0")
+        connection.execute(
+            "ALTER TABLE position_sizing_snapshot ADD COLUMN IF NOT EXISTS planned_entry_trade_date DATE"
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_position_candidate_symbol ON position_candidate_audit(symbol, signal_date)"
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_position_sizing_symbol ON position_sizing_snapshot(symbol, signal_date)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_position_exit_plan_symbol ON position_exit_plan(symbol, exit_signal_date)"
         )

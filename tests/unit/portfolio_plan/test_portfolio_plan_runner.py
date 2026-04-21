@@ -37,9 +37,13 @@ def test_portfolio_plan_runner_handles_missing_position_database(monkeypatch, tm
         read_only=True,
     ) as connection:
         run_rows = connection.execute("SELECT status, bounded_candidate_count FROM portfolio_plan_run").fetchall()
+        default_cap = connection.execute(
+            "SELECT portfolio_gross_cap_weight FROM portfolio_plan_run"
+        ).fetchone()[0]
         checkpoint_count = connection.execute("SELECT COUNT(*) FROM portfolio_plan_checkpoint").fetchone()[0]
 
     assert run_rows == [("completed", 0)]
+    assert default_cap == 0.50
     assert checkpoint_count == 0
 
 
@@ -67,6 +71,35 @@ def test_portfolio_plan_runner_records_reused_checkpoint_fast_path(monkeypatch, 
 
     assert queue_rows == [("reused", 5)]
     assert len(checkpoint_rows) == 1
+
+
+def test_portfolio_plan_releases_capacity_after_scheduled_exit(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_market_base_day(workspace / "data" / "base" / "market_base.duckdb")
+    _write_alpha_signal(workspace / "data" / "astock_lifespan_alpha" / "alpha" / "alpha_signal.duckdb")
+
+    run_position_from_alpha_signal()
+    run_portfolio_plan_build(portfolio_gross_cap_weight=0.08)
+
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"),
+        read_only=True,
+    ) as connection:
+        rows = connection.execute(
+            """
+            SELECT candidate_nk, plan_status, admitted_weight, blocking_reason_code,
+                   current_portfolio_gross_weight, remaining_portfolio_capacity_weight
+            FROM portfolio_plan_snapshot
+            WHERE candidate_nk IN ('signal:bof:1', 'signal:tst:1', 'signal:cpb:1')
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+
+    assert rows == [
+        ("signal:bof:1", "trimmed", 0.08, "portfolio_capacity_trimmed", 0.0, 0.0),
+        ("signal:cpb:1", "admitted", 0.048, None, 0.0, 0.032),
+        ("signal:tst:1", "blocked", 0.0, "portfolio_capacity_exhausted", 0.08, 0.0),
+    ]
 
 
 def test_portfolio_plan_runner_rolls_back_failed_rematerialization(monkeypatch, tmp_path):

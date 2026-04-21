@@ -69,12 +69,15 @@ def _load_portfolio_plan_rows(
                 portfolio_id,
                 symbol,
                 CAST(reference_trade_date AS DATE) AS reference_trade_date,
+                CAST(planned_entry_trade_date AS DATE) AS planned_entry_trade_date,
+                CAST(scheduled_exit_trade_date AS DATE) AS scheduled_exit_trade_date,
                 position_action_decision,
                 requested_weight,
                 admitted_weight,
                 trimmed_weight,
                 plan_status,
-                blocking_reason_code
+                blocking_reason_code,
+                planned_exit_reason_code
             FROM portfolio_plan_snapshot
             WHERE portfolio_id = ?
             ORDER BY portfolio_id, symbol, reference_trade_date, candidate_nk
@@ -89,12 +92,15 @@ def _load_portfolio_plan_rows(
         row_portfolio_id,
         symbol,
         reference_trade_date,
+        planned_entry_trade_date,
+        scheduled_exit_trade_date,
         position_action_decision,
         requested_weight,
         admitted_weight,
         trimmed_weight,
         plan_status,
         blocking_reason_code,
+        planned_exit_reason_code,
     ) in rows:
         row = PortfolioPlanTradeInputRow(
             plan_snapshot_nk=str(plan_snapshot_nk),
@@ -102,12 +108,15 @@ def _load_portfolio_plan_rows(
             portfolio_id=str(row_portfolio_id),
             symbol=str(symbol),
             reference_trade_date=_as_date(reference_trade_date) if reference_trade_date is not None else None,
+            planned_entry_trade_date=_as_date(planned_entry_trade_date) if planned_entry_trade_date is not None else None,
+            scheduled_exit_trade_date=_as_date(scheduled_exit_trade_date) if scheduled_exit_trade_date is not None else None,
             position_action_decision=str(position_action_decision),
             requested_weight=float(requested_weight),
             admitted_weight=float(admitted_weight),
             trimmed_weight=float(trimmed_weight),
             plan_status=str(plan_status),
             blocking_reason_code=str(blocking_reason_code) if blocking_reason_code is not None else None,
+            planned_exit_reason_code=str(planned_exit_reason_code) if planned_exit_reason_code is not None else None,
         )
         grouped[(row.portfolio_id, row.symbol)].append(row)
     return dict(grouped)

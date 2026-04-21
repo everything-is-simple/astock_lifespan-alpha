@@ -19,7 +19,7 @@ from astock_lifespan_alpha.system.contracts import (
 from astock_lifespan_alpha.system.schema import initialize_system_schema
 
 
-REQUIRED_TRADE_TABLES = ("trade_order_intent", "trade_order_execution")
+REQUIRED_TRADE_TABLES = ("trade_order_intent", "trade_order_execution", "trade_exit_execution", "trade_position_leg")
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ def run_system_from_trade(
     portfolio_id: str = "core",
     settings: WorkspaceRoots | None = None,
 ) -> SystemRunSummary:
-    """Build the minimal trade -> system readout ledger."""
+    """Build the rolling trade -> system readout ledger."""
 
     workspace = settings or default_settings()
     workspace.ensure_directories()
@@ -168,6 +168,7 @@ def _attach_system_trade_source_view(
         f"""
         CREATE OR REPLACE TEMP VIEW system_trade_source_rows AS
         SELECT
+            CONCAT('system:', execution.order_execution_nk) AS system_readout_nk,
             intent.order_intent_nk,
             execution.order_execution_nk,
             intent.portfolio_id,
@@ -175,6 +176,8 @@ def _attach_system_trade_source_view(
             CAST(intent.reference_trade_date AS DATE) AS reference_trade_date,
             CAST(intent.planned_trade_date AS DATE) AS planned_trade_date,
             CAST(execution.execution_trade_date AS DATE) AS execution_trade_date,
+            'open_entry' AS trade_action,
+            CAST(NULL AS VARCHAR) AS position_leg_nk,
             intent.position_action_decision,
             intent.intent_status,
             execution.execution_status,
@@ -189,6 +192,34 @@ def _attach_system_trade_source_view(
         INNER JOIN system_trade_source.trade_order_intent AS intent
             ON intent.order_intent_nk = execution.order_intent_nk
         WHERE intent.portfolio_id = {portfolio_id_literal}
+
+        UNION ALL
+
+        SELECT
+            CONCAT('system:', exit_execution.exit_execution_nk) AS system_readout_nk,
+            CONCAT(exit_execution.position_leg_nk, ':exit') AS order_intent_nk,
+            exit_execution.exit_execution_nk AS order_execution_nk,
+            exit_execution.portfolio_id,
+            exit_execution.symbol,
+            leg.entry_reference_trade_date AS reference_trade_date,
+            leg.scheduled_exit_trade_date AS planned_trade_date,
+            exit_execution.exit_trade_date AS execution_trade_date,
+            'full_exit' AS trade_action,
+            exit_execution.position_leg_nk,
+            'full_exit' AS position_action_decision,
+            CASE WHEN exit_execution.execution_status = 'filled' THEN 'planned' ELSE 'blocked' END AS intent_status,
+            exit_execution.execution_status,
+            leg.position_weight AS requested_weight,
+            leg.position_weight AS admitted_weight,
+            leg.position_weight AS execution_weight,
+            exit_execution.exited_weight AS executed_weight,
+            exit_execution.execution_price,
+            exit_execution.blocking_reason_code,
+            exit_execution.source_price_line
+        FROM system_trade_source.trade_exit_execution AS exit_execution
+        INNER JOIN system_trade_source.trade_position_leg AS leg
+            ON leg.position_leg_nk = exit_execution.position_leg_nk
+        WHERE exit_execution.portfolio_id = {portfolio_id_literal}
         """
     )
     row_count, work_unit_count = connection.execute(
@@ -214,7 +245,9 @@ def _create_system_source_work_unit_summary(*, connection: duckdb.DuckDBPyConnec
             md5(
                 string_agg(
                     CONCAT(
-                        order_intent_nk,
+                        system_readout_nk,
+                        '|',
+                        COALESCE(order_intent_nk, ''),
                         '|',
                         order_execution_nk,
                         '|',
@@ -227,6 +260,10 @@ def _create_system_source_work_unit_summary(*, connection: duckdb.DuckDBPyConnec
                         COALESCE(CAST(planned_trade_date AS VARCHAR), ''),
                         '|',
                         COALESCE(CAST(execution_trade_date AS VARCHAR), ''),
+                        '|',
+                        trade_action,
+                        '|',
+                        COALESCE(position_leg_nk, ''),
                         '|',
                         position_action_decision,
                         '|',
@@ -391,7 +428,7 @@ def _materialize_system_sql(
         """
         CREATE OR REPLACE TEMP TABLE system_materialized_readout AS
         SELECT
-            'system:' || source.order_execution_nk AS system_readout_nk,
+            source.system_readout_nk,
             source.order_intent_nk,
             source.order_execution_nk,
             source.portfolio_id,
@@ -399,6 +436,8 @@ def _materialize_system_sql(
             source.reference_trade_date,
             source.planned_trade_date,
             source.execution_trade_date,
+            source.trade_action,
+            source.position_leg_nk,
             source.position_action_decision,
             source.intent_status,
             source.execution_status,
@@ -433,7 +472,7 @@ def _materialize_system_sql(
             """
             INSERT INTO system_trade_readout (
                 system_readout_nk, order_intent_nk, order_execution_nk, portfolio_id, symbol,
-                reference_trade_date, planned_trade_date, execution_trade_date,
+                reference_trade_date, planned_trade_date, execution_trade_date, trade_action, position_leg_nk,
                 position_action_decision, intent_status, execution_status,
                 requested_weight, admitted_weight, execution_weight, executed_weight,
                 execution_price, blocking_reason_code, source_price_line,
@@ -448,6 +487,8 @@ def _materialize_system_sql(
                 reference_trade_date,
                 planned_trade_date,
                 execution_trade_date,
+                trade_action,
+                position_leg_nk,
                 position_action_decision,
                 intent_status,
                 execution_status,
@@ -471,6 +512,9 @@ def _materialize_system_sql(
             """
             INSERT INTO system_portfolio_trade_summary (
                 portfolio_id,
+                open_entry_count,
+                full_exit_count,
+                active_symbol_count,
                 execution_count,
                 filled_count,
                 rejected_count,
@@ -481,20 +525,32 @@ def _materialize_system_sql(
                 last_materialized_run_id
             )
             SELECT
-                portfolio_id,
+                readout.portfolio_id,
+                SUM(CASE WHEN readout.trade_action = 'open_entry' AND readout.execution_status = 'filled' THEN 1 ELSE 0 END) AS open_entry_count,
+                SUM(CASE WHEN readout.trade_action = 'full_exit' AND readout.execution_status = 'filled' THEN 1 ELSE 0 END) AS full_exit_count,
+                COALESCE(active_positions.active_symbol_count, 0) AS active_symbol_count,
                 COUNT(*) AS execution_count,
-                SUM(CASE WHEN execution_status = 'filled' THEN 1 ELSE 0 END) AS filled_count,
-                SUM(CASE WHEN execution_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
-                COUNT(DISTINCT symbol) AS symbol_count,
-                SUM(ABS(executed_weight)) AS gross_executed_weight,
-                MAX(execution_trade_date) AS latest_execution_trade_date,
+                SUM(CASE WHEN readout.execution_status = 'filled' THEN 1 ELSE 0 END) AS filled_count,
+                SUM(CASE WHEN readout.execution_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+                COUNT(DISTINCT readout.symbol) AS symbol_count,
+                SUM(ABS(readout.executed_weight)) AS gross_executed_weight,
+                MAX(readout.execution_trade_date) AS latest_execution_trade_date,
                 ? AS system_contract_version,
                 ? AS last_materialized_run_id
-            FROM system_trade_readout
-            WHERE portfolio_id = ?
-            GROUP BY portfolio_id
+            FROM system_trade_readout AS readout
+            LEFT JOIN (
+                SELECT portfolio_id, COUNT(DISTINCT symbol) AS active_symbol_count
+                FROM system_trade_source.trade_position_leg
+                WHERE portfolio_id = ?
+                    AND position_state = 'open'
+                    AND active_weight > 0
+                GROUP BY portfolio_id
+            ) AS active_positions
+                ON active_positions.portfolio_id = readout.portfolio_id
+            WHERE readout.portfolio_id = ?
+            GROUP BY readout.portfolio_id, active_positions.active_symbol_count
             """,
-            [SYSTEM_CONTRACT_VERSION, run_id, portfolio_id],
+            [SYSTEM_CONTRACT_VERSION, run_id, portfolio_id, portfolio_id],
         )
         connection.execute("COMMIT")
     except Exception:

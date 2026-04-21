@@ -40,6 +40,8 @@ def test_position_runner_materializes_candidate_capacity_and_sizing(monkeypatch,
     assert first_summary.materialization_counts["candidate_rows"] == 5
     assert first_summary.materialization_counts["capacity_rows"] == 5
     assert first_summary.materialization_counts["sizing_rows"] == 5
+    assert first_summary.materialization_counts["exit_plan_rows"] == 3
+    assert first_summary.materialization_counts["exit_leg_rows"] == 3
     assert second_summary.materialization_counts["candidate_rows"] == 0
     assert second_summary.checkpoint_summary.work_units_updated == 0
 
@@ -57,10 +59,18 @@ def test_position_runner_materializes_candidate_capacity_and_sizing(monkeypatch,
         max_weight = connection.execute(
             "SELECT MAX(final_allowed_position_weight) FROM position_sizing_snapshot"
         ).fetchone()[0]
+        earliest_entry_trade_date = connection.execute(
+            """
+            SELECT MIN(planned_entry_trade_date)
+            FROM position_sizing_snapshot
+            WHERE final_allowed_position_weight > 0
+            """
+        ).fetchone()[0]
 
     assert dict(status_rows)["admitted"] >= 2
     assert dict(status_rows)["blocked"] >= 1
-    assert max_weight <= 0.12
+    assert max_weight <= 0.15
+    assert earliest_entry_trade_date == date(2026, 1, 4)
 
 
 def test_portfolio_plan_runner_bridges_from_position_outputs(monkeypatch, tmp_path):
@@ -140,10 +150,7 @@ def test_portfolio_plan_runner_rematerializes_when_capacity_changes(monkeypatch,
         ).fetchall()
 
     assert rematerialized_rows >= 1
-    assert exhausted_rows == [
-        ("signal:cpb:1", "portfolio_capacity_exhausted"),
-        ("signal:tst:1", "portfolio_capacity_exhausted"),
-    ]
+    assert exhausted_rows == [("signal:tst:1", "portfolio_capacity_exhausted")]
     assert trimmed_rows == [("signal:bof:1", 0.08, 0.04)]
 
 
@@ -180,8 +187,16 @@ def test_position_runner_filters_backward_adjust_method(monkeypatch, tmp_path):
             LIMIT 1
             """
         ).fetchone()[0]
+        first_entry_date = connection.execute(
+            """
+            SELECT planned_entry_trade_date
+            FROM position_sizing_snapshot
+            WHERE candidate_nk = 'signal:bof:1'
+            """
+        ).fetchone()[0]
 
     assert first_reference == 10.8
+    assert first_entry_date == date(2026, 1, 4)
 
 
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:

@@ -7,7 +7,7 @@ from datetime import date
 from enum import Enum
 
 
-TRADE_CONTRACT_VERSION = "stage5_trade_v1"
+TRADE_CONTRACT_VERSION = "stage5_trade_v2"
 EXECUTION_PRICE_LINE = "execution_price_line"
 
 
@@ -101,12 +101,15 @@ class PortfolioPlanTradeInputRow:
     portfolio_id: str
     symbol: str
     reference_trade_date: date | None
+    planned_entry_trade_date: date | None
+    scheduled_exit_trade_date: date | None
     position_action_decision: str
     requested_weight: float
     admitted_weight: float
     trimmed_weight: float
     plan_status: str
     blocking_reason_code: str | None
+    planned_exit_reason_code: str | None
 
 
 @dataclass(frozen=True)

@@ -69,13 +69,15 @@ def initialize_system_schema(database_path: Path) -> None:
             """
             CREATE TABLE IF NOT EXISTS system_trade_readout (
                 system_readout_nk TEXT PRIMARY KEY,
-                order_intent_nk TEXT NOT NULL,
+                order_intent_nk TEXT,
                 order_execution_nk TEXT NOT NULL,
                 portfolio_id TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 reference_trade_date DATE,
                 planned_trade_date DATE,
                 execution_trade_date DATE,
+                trade_action TEXT NOT NULL DEFAULT 'open_entry',
+                position_leg_nk TEXT,
                 position_action_decision TEXT NOT NULL,
                 intent_status TEXT NOT NULL,
                 execution_status TEXT NOT NULL,
@@ -97,6 +99,9 @@ def initialize_system_schema(database_path: Path) -> None:
             """
             CREATE TABLE IF NOT EXISTS system_portfolio_trade_summary (
                 portfolio_id TEXT PRIMARY KEY,
+                open_entry_count BIGINT NOT NULL DEFAULT 0,
+                full_exit_count BIGINT NOT NULL DEFAULT 0,
+                active_symbol_count BIGINT NOT NULL DEFAULT 0,
                 execution_count BIGINT NOT NULL DEFAULT 0,
                 filled_count BIGINT NOT NULL DEFAULT 0,
                 rejected_count BIGINT NOT NULL DEFAULT 0,
@@ -110,6 +115,15 @@ def initialize_system_schema(database_path: Path) -> None:
             )
             """
         )
+        connection.execute(
+            "ALTER TABLE system_trade_readout ADD COLUMN IF NOT EXISTS trade_action TEXT DEFAULT 'open_entry'"
+        )
+        connection.execute(
+            "ALTER TABLE system_trade_readout ADD COLUMN IF NOT EXISTS position_leg_nk TEXT"
+        )
+        connection.execute("ALTER TABLE system_portfolio_trade_summary ADD COLUMN IF NOT EXISTS open_entry_count BIGINT DEFAULT 0")
+        connection.execute("ALTER TABLE system_portfolio_trade_summary ADD COLUMN IF NOT EXISTS full_exit_count BIGINT DEFAULT 0")
+        connection.execute("ALTER TABLE system_portfolio_trade_summary ADD COLUMN IF NOT EXISTS active_symbol_count BIGINT DEFAULT 0")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_system_trade_readout_portfolio ON system_trade_readout(portfolio_id, execution_trade_date)"
         )

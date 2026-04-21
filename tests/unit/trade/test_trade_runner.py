@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import duckdb
@@ -95,6 +95,13 @@ def test_trade_runner_materializes_admitted_trimmed_and_blocked_rows(monkeypatch
             ORDER BY candidate_nk
             """
         ).fetchall()
+        position_legs = connection.execute(
+            """
+            SELECT candidate_nk, position_state, active_weight
+            FROM trade_position_leg
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
 
     assert intents == [
         ("candidate:admitted", "planned", date(2026, 1, 4), 0.10),
@@ -113,6 +120,10 @@ def test_trade_runner_materializes_admitted_trimmed_and_blocked_rows(monkeypatch
             "portfolio_capacity_exhausted",
         ),
         ("candidate:trimmed", "filled", date(2026, 1, 4), 11.1, 0.03, "execution_price_line", None),
+    ]
+    assert position_legs == [
+        ("candidate:admitted", "open", 0.10),
+        ("candidate:trimmed", "open", 0.03),
     ]
 
 
@@ -236,6 +247,68 @@ def test_trade_runner_reuses_same_input_and_rematerializes_changed_work_unit(mon
     assert execution_weight == 0.05
 
 
+def test_trade_runner_materializes_exit_and_carry_rows(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_market_base_day(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+            ("AAA", "2026-01-05T00:00:00", 10.7),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb",
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:exit",
+                candidate_nk="candidate:exit",
+                reference_trade_date=date(2026, 1, 3),
+                planned_entry_trade_date=date(2026, 1, 4),
+                scheduled_exit_trade_date=date(2026, 1, 5),
+                planned_exit_reason_code="signal_not_confirmed_exit",
+                admitted_weight=0.10,
+                plan_status="admitted",
+            )
+        ],
+    )
+
+    summary = run_trade_from_portfolio_plan()
+
+    assert summary.materialization_counts["position_legs_inserted"] == 1
+    assert summary.materialization_counts["carry_rows_inserted"] == 2
+    assert summary.materialization_counts["exit_rows_inserted"] == 1
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"),
+        read_only=True,
+    ) as connection:
+        exit_rows = connection.execute(
+            """
+            SELECT candidate_nk, execution_status, exit_trade_date, exited_weight, exit_reason_code
+            FROM trade_exit_execution
+            """
+        ).fetchall()
+        leg_rows = connection.execute(
+            """
+            SELECT candidate_nk, position_state, exit_trade_date, active_weight
+            FROM trade_position_leg
+            """
+        ).fetchall()
+        carry_rows = connection.execute(
+            """
+            SELECT carry_status, as_of_trade_date, carried_weight
+            FROM trade_carry_snapshot
+            ORDER BY as_of_trade_date, carry_snapshot_nk
+            """
+        ).fetchall()
+
+    assert exit_rows == [
+        ("candidate:exit", "filled", date(2026, 1, 5), 0.10, "signal_not_confirmed_exit"),
+    ]
+    assert leg_rows == [("candidate:exit", "closed", date(2026, 1, 5), 0.0)]
+    assert carry_rows == [("open", date(2026, 1, 4), 0.10), ("closed", date(2026, 1, 5), 0.0)]
+
+
 def test_trade_source_reads_stock_daily_adjusted_code_trade_date(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_stock_daily_adjusted(
@@ -323,11 +396,13 @@ def _write_portfolio_plan_snapshot(database_path: Path, rows: list[dict[str, obj
             """
             INSERT INTO portfolio_plan_snapshot (
                 plan_snapshot_nk, candidate_nk, portfolio_id, symbol, reference_trade_date,
-                position_action_decision, requested_weight, admitted_weight, trimmed_weight,
-                plan_status, blocking_reason_code, portfolio_gross_cap_weight,
+                planned_entry_trade_date, scheduled_exit_trade_date, position_action_decision,
+                requested_weight, admitted_weight, trimmed_weight,
+                plan_status, blocking_reason_code, planned_exit_reason_code, portfolio_gross_cap_weight,
+                current_portfolio_gross_weight, remaining_portfolio_capacity_weight,
                 portfolio_gross_used_weight, portfolio_gross_remaining_weight,
                 portfolio_plan_contract_version, first_seen_run_id, last_materialized_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -336,16 +411,21 @@ def _write_portfolio_plan_snapshot(database_path: Path, rows: list[dict[str, obj
                     row["portfolio_id"],
                     row["symbol"],
                     row["reference_trade_date"],
+                    row["planned_entry_trade_date"],
+                    row["scheduled_exit_trade_date"],
                     row["position_action_decision"],
                     row["requested_weight"],
                     row["admitted_weight"],
                     row["trimmed_weight"],
                     row["plan_status"],
                     row["blocking_reason_code"],
-                    0.15,
-                    row["admitted_weight"],
-                    0.15 - float(row["admitted_weight"]),
-                    "stage4_portfolio_plan_v1",
+                    row["planned_exit_reason_code"],
+                    row["portfolio_gross_cap_weight"],
+                    row["current_portfolio_gross_weight"],
+                    row["remaining_portfolio_capacity_weight"],
+                    row["portfolio_gross_used_weight"],
+                    row["portfolio_gross_remaining_weight"],
+                    "stage4_portfolio_plan_v2",
                     "portfolio-run-1",
                     "portfolio-run-1",
                 )
@@ -360,25 +440,45 @@ def _plan_row(
     candidate_nk: str,
     symbol: str = "AAA",
     reference_trade_date: date,
+    planned_entry_trade_date: date | None = None,
+    scheduled_exit_trade_date: date | None = None,
     position_action_decision: str = "open",
     requested_weight: float = 0.10,
     admitted_weight: float,
     trimmed_weight: float = 0.0,
     plan_status: str,
     blocking_reason_code: str | None = None,
+    planned_exit_reason_code: str | None = None,
+    portfolio_gross_cap_weight: float = 0.50,
+    current_portfolio_gross_weight: float = 0.0,
+    remaining_portfolio_capacity_weight: float | None = None,
 ) -> dict[str, object]:
+    final_admitted_weight = admitted_weight if plan_status in {"admitted", "trimmed"} else 0.0
+    remaining_capacity = (
+        remaining_portfolio_capacity_weight
+        if remaining_portfolio_capacity_weight is not None
+        else round(max(portfolio_gross_cap_weight - (current_portfolio_gross_weight + final_admitted_weight), 0.0), 4)
+    )
     return {
         "plan_snapshot_nk": plan_snapshot_nk,
         "candidate_nk": candidate_nk,
         "portfolio_id": "core",
         "symbol": symbol,
         "reference_trade_date": reference_trade_date,
+        "planned_entry_trade_date": planned_entry_trade_date or (reference_trade_date + timedelta(days=1)),
+        "scheduled_exit_trade_date": scheduled_exit_trade_date,
         "position_action_decision": position_action_decision,
         "requested_weight": requested_weight,
         "admitted_weight": admitted_weight,
         "trimmed_weight": trimmed_weight,
         "plan_status": plan_status,
         "blocking_reason_code": blocking_reason_code,
+        "planned_exit_reason_code": planned_exit_reason_code,
+        "portfolio_gross_cap_weight": portfolio_gross_cap_weight,
+        "current_portfolio_gross_weight": current_portfolio_gross_weight,
+        "remaining_portfolio_capacity_weight": remaining_capacity,
+        "portfolio_gross_used_weight": round(current_portfolio_gross_weight + final_admitted_weight, 4),
+        "portfolio_gross_remaining_weight": remaining_capacity,
     }
 
 
