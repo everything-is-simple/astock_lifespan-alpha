@@ -14,20 +14,13 @@ from astock_lifespan_alpha.alpha.contracts import (
     AlphaRunSummary,
     TriggerType,
 )
-from astock_lifespan_alpha.alpha.engine import (
-    AlphaSignalRow,
-    TriggerEvaluationResult,
-    TriggerEventRow,
-    build_alpha_signal_rows,
-    evaluate_trigger_rows,
-)
 from astock_lifespan_alpha.alpha.schema import (
     SIGNAL_TABLES,
     TRIGGER_TABLES,
     initialize_alpha_signal_schema,
     initialize_alpha_trigger_schema,
 )
-from astock_lifespan_alpha.alpha.source import load_alpha_source_rows
+from astock_lifespan_alpha.alpha.source import ALPHA_SOURCE_VIEW_NAME, attach_alpha_source_view
 from astock_lifespan_alpha.core.paths import WorkspaceRoots, default_settings
 
 
@@ -71,7 +64,7 @@ def run_alpha_signal_build(*, settings: WorkspaceRoots | None = None) -> AlphaRu
     counts = {"signal_rows": 0}
     sources_updated = 0
     latest_signal_date: date | None = None
-    source_events = _load_events_from_trigger_databases(workspace)
+    source_trigger_paths = _discover_trigger_event_sources(workspace)
 
     with duckdb.connect(str(target_path)) as connection:
         connection.execute(
@@ -79,11 +72,15 @@ def run_alpha_signal_build(*, settings: WorkspaceRoots | None = None) -> AlphaRu
             INSERT INTO alpha_signal_run (run_id, status, source_trigger_count, message)
             VALUES (?, 'running', ?, 'alpha_signal run started.')
             """,
-            [run_id, len(source_events)],
+            [run_id, len(source_trigger_paths)],
         )
         connection.execute("DELETE FROM alpha_signal_work_queue")
-        for source_trigger_db, events in source_events.items():
-            last_source_date = max((event.signal_date for event in events), default=None)
+        for source_trigger_db, database_path in source_trigger_paths.items():
+            alias = f"source_{source_trigger_db}"
+            connection.execute(f"ATTACH {_duckdb_string_literal(database_path)} AS {alias} (READ_ONLY)")
+            source_row_count, last_source_date = connection.execute(
+                f"SELECT COUNT(*), MAX(signal_date) FROM {alias}.alpha_trigger_event"
+            ).fetchone()
             if latest_signal_date is None or (last_source_date is not None and last_source_date > latest_signal_date):
                 latest_signal_date = last_source_date
             queue_id = f"{run_id}:{source_trigger_db}"
@@ -93,7 +90,7 @@ def run_alpha_signal_build(*, settings: WorkspaceRoots | None = None) -> AlphaRu
                     queue_id, source_trigger_db, status, source_row_count, claimed_at, last_signal_date
                 ) VALUES (?, ?, 'running', ?, CURRENT_TIMESTAMP, ?)
                 """,
-                [queue_id, source_trigger_db, len(events), last_source_date],
+                [queue_id, source_trigger_db, source_row_count, last_source_date],
             )
             checkpoint_date = _load_signal_checkpoint_date(connection=connection, source_trigger_db=source_trigger_db)
             if checkpoint_date is not None and last_source_date is not None and checkpoint_date >= last_source_date:
@@ -107,8 +104,34 @@ def run_alpha_signal_build(*, settings: WorkspaceRoots | None = None) -> AlphaRu
                 )
                 continue
             connection.execute("DELETE FROM alpha_signal WHERE source_trigger_db = ?", [source_trigger_db])
-            signal_rows = build_alpha_signal_rows(trigger_events={source_trigger_db: events})
-            _insert_signal_rows(connection=connection, run_id=run_id, rows=signal_rows)
+            connection.execute(
+                f"""
+                INSERT INTO alpha_signal (
+                    signal_nk, run_id, symbol, signal_date, trigger_type, formal_signal_status, source_trigger_db,
+                    source_trigger_event_nk, wave_id, direction, new_count, no_new_span, life_state,
+                    update_rank, stagnation_rank, wave_position_zone
+                )
+                SELECT
+                    CONCAT(trigger_type, ':', event_nk),
+                    ?,
+                    symbol,
+                    signal_date,
+                    trigger_type,
+                    formal_signal_status,
+                    ?,
+                    event_nk,
+                    wave_id,
+                    direction,
+                    new_count,
+                    no_new_span,
+                    life_state,
+                    update_rank,
+                    stagnation_rank,
+                    wave_position_zone
+                FROM {alias}.alpha_trigger_event
+                """,
+                [run_id, source_trigger_db],
+            )
             _upsert_signal_checkpoint(
                 connection=connection,
                 source_trigger_db=source_trigger_db,
@@ -123,10 +146,10 @@ def run_alpha_signal_build(*, settings: WorkspaceRoots | None = None) -> AlphaRu
                 """,
                 [queue_id],
             )
-            counts["signal_rows"] += len(signal_rows)
+            counts["signal_rows"] += int(source_row_count)
             sources_updated += 1
 
-        if not source_events:
+        if not source_trigger_paths:
             message = "alpha_signal schema initialized without trigger events."
 
         connection.execute(
@@ -158,13 +181,13 @@ def run_alpha_signal_build(*, settings: WorkspaceRoots | None = None) -> AlphaRu
         status=AlphaRunStatus.COMPLETED.value,
         target_path=str(target_path),
         source_paths={
-            trigger_db: str(getattr(workspace.databases, trigger_db))
-            for trigger_db in source_events.keys()
+            trigger_db: str(database_path)
+            for trigger_db, database_path in source_trigger_paths.items()
         },
         message=message,
         materialization_counts=counts,
         checkpoint_summary=AlphaCheckpointSummary(
-            work_units_seen=len(source_events),
+            work_units_seen=len(source_trigger_paths),
             work_units_updated=sources_updated,
             latest_signal_date=latest_signal_date.isoformat() if latest_signal_date is not None else None,
         ),
@@ -183,13 +206,13 @@ def _run_trigger_build(
     initialize_alpha_trigger_schema(target_path)
 
     run_id = f"{trigger_type.value}-{uuid4().hex[:12]}"
-    source = load_alpha_source_rows(workspace)
     message = f"{trigger_type.value} run completed."
     counts = {"event_rows": 0, "profile_rows": 0}
     symbols_updated = 0
     latest_signal_date: date | None = None
 
     with duckdb.connect(str(target_path)) as connection:
+        source = attach_alpha_source_view(connection, workspace)
         connection.execute(
             """
             INSERT INTO alpha_run (
@@ -202,63 +225,18 @@ def _run_trigger_build(
                 str(source.market_source_path) if source.market_source_path is not None else None,
                 str(source.malf_source_path) if source.malf_source_path is not None else None,
                 source.row_count,
-                len(source.rows_by_symbol),
+                source.symbol_count,
             ],
         )
         connection.execute("DELETE FROM alpha_work_queue WHERE trigger_type = ?", [trigger_type.value])
-        for symbol, rows in source.rows_by_symbol.items():
-            last_signal_date = rows[-1].signal_date
-            if latest_signal_date is None or last_signal_date > latest_signal_date:
-                latest_signal_date = last_signal_date
-            queue_id = f"{run_id}:{symbol}"
-            connection.execute(
-                """
-                INSERT INTO alpha_work_queue (
-                    queue_id, symbol, trigger_type, status, source_row_count, claimed_at, last_signal_date
-                ) VALUES (?, ?, ?, 'running', ?, CURRENT_TIMESTAMP, ?)
-                """,
-                [queue_id, symbol, trigger_type.value, len(rows), last_signal_date],
-            )
-            checkpoint_date = _load_trigger_checkpoint_date(
-                connection=connection,
-                trigger_type=trigger_type,
-                symbol=symbol,
-            )
-            if checkpoint_date is not None and checkpoint_date >= last_signal_date:
-                connection.execute(
-                    """
-                    UPDATE alpha_work_queue
-                    SET status = 'skipped', finished_at = CURRENT_TIMESTAMP
-                    WHERE queue_id = ?
-                    """,
-                    [queue_id],
-                )
-                continue
-
-            result = evaluate_trigger_rows(trigger_type=trigger_type, rows=rows)
-            _replace_trigger_symbol_rows(connection=connection, trigger_type=trigger_type, symbol=symbol)
-            _insert_trigger_result_rows(connection=connection, run_id=run_id, result=result)
-            _upsert_trigger_checkpoint(
-                connection=connection,
-                trigger_type=trigger_type,
-                symbol=symbol,
-                run_id=run_id,
-                last_signal_date=last_signal_date,
-            )
-            connection.execute(
-                """
-                UPDATE alpha_work_queue
-                SET status = 'completed', finished_at = CURRENT_TIMESTAMP
-                WHERE queue_id = ?
-                """,
-                [queue_id],
-            )
-            counts["event_rows"] += len(result.events)
-            counts["profile_rows"] += len(result.profiles)
-            symbols_updated += 1
-
-        if not source.rows_by_symbol:
+        if source.symbol_count == 0:
             message = f"{trigger_type.value} schema initialized without source rows."
+        else:
+            counts, symbols_updated, latest_signal_date = _materialize_trigger_build_sql(
+                connection=connection,
+                run_id=run_id,
+                trigger_type=trigger_type,
+            )
 
         connection.execute(
             """
@@ -297,128 +275,233 @@ def _run_trigger_build(
         message=message,
         materialization_counts=counts,
         checkpoint_summary=AlphaCheckpointSummary(
-            work_units_seen=len(source.rows_by_symbol),
+            work_units_seen=source.symbol_count,
             work_units_updated=symbols_updated,
             latest_signal_date=latest_signal_date.isoformat() if latest_signal_date is not None else None,
         ),
     )
 
 
-def _replace_trigger_symbol_rows(
-    *,
-    connection: duckdb.DuckDBPyConnection,
-    trigger_type: TriggerType,
-    symbol: str,
-) -> None:
-    connection.execute(
-        "DELETE FROM alpha_trigger_event WHERE trigger_type = ? AND symbol = ?",
-        [trigger_type.value, symbol],
-    )
-    connection.execute(
-        "DELETE FROM alpha_trigger_profile WHERE trigger_type = ? AND symbol = ?",
-        [trigger_type.value, symbol],
-    )
-
-
-def _insert_trigger_result_rows(
+def _materialize_trigger_build_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
-    result: TriggerEvaluationResult,
-) -> None:
-    if result.events:
-        connection.executemany(
-            """
-            INSERT INTO alpha_trigger_event (
-                event_nk, run_id, symbol, signal_date, trigger_type, formal_signal_status, source_bar_dt,
-                wave_id, direction, new_count, no_new_span, life_state, update_rank, stagnation_rank, wave_position_zone
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row.event_nk,
-                    run_id,
-                    row.symbol,
-                    row.signal_date,
-                    row.trigger_type,
-                    row.formal_signal_status,
-                    row.source_bar_dt,
-                    row.wave_id,
-                    row.direction,
-                    row.new_count,
-                    row.no_new_span,
-                    row.life_state,
-                    row.update_rank,
-                    row.stagnation_rank,
-                    row.wave_position_zone,
-                )
-                for row in result.events
-            ],
-        )
-    if result.profiles:
-        connection.executemany(
-            """
-            INSERT INTO alpha_trigger_profile (
-                profile_nk, run_id, symbol, trigger_type, formal_signal_status, event_count,
-                latest_signal_date, avg_update_rank, avg_stagnation_rank
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row.profile_nk,
-                    run_id,
-                    row.symbol,
-                    row.trigger_type,
-                    row.formal_signal_status,
-                    row.event_count,
-                    row.latest_signal_date,
-                    row.avg_update_rank,
-                    row.avg_stagnation_rank,
-                )
-                for row in result.profiles
-            ],
-        )
-
-
-def _load_trigger_checkpoint_date(
-    *,
-    connection: duckdb.DuckDBPyConnection,
     trigger_type: TriggerType,
-    symbol: str,
-) -> date | None:
-    row = connection.execute(
-        "SELECT last_signal_date FROM alpha_checkpoint WHERE trigger_type = ? AND symbol = ?",
-        [trigger_type.value, symbol],
-    ).fetchone()
-    return row[0] if row else None
-
-
-def _upsert_trigger_checkpoint(
-    *,
-    connection: duckdb.DuckDBPyConnection,
-    trigger_type: TriggerType,
-    symbol: str,
-    run_id: str,
-    last_signal_date: date,
-) -> None:
-    updated_at = datetime.utcnow()
+) -> tuple[dict[str, int], int, date | None]:
+    trigger_value = trigger_type.value
+    connection.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE alpha_source_symbol_summary AS
+        SELECT
+            symbol,
+            COUNT(*) AS source_row_count,
+            MAX(signal_date) AS last_signal_date
+        FROM {ALPHA_SOURCE_VIEW_NAME}
+        GROUP BY symbol
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE alpha_symbols_to_update AS
+        SELECT summary.symbol, summary.source_row_count, summary.last_signal_date
+        FROM alpha_source_symbol_summary summary
+        LEFT JOIN alpha_checkpoint checkpoint
+            ON checkpoint.symbol = summary.symbol
+            AND checkpoint.trigger_type = ?
+        WHERE checkpoint.last_signal_date IS NULL
+            OR checkpoint.last_signal_date < summary.last_signal_date
+        """,
+        [trigger_value],
+    )
+    latest_signal_date = connection.execute(
+        "SELECT MAX(last_signal_date) FROM alpha_source_symbol_summary"
+    ).fetchone()[0]
+    connection.execute(
+        """
+        INSERT INTO alpha_work_queue (
+            queue_id, symbol, trigger_type, status, source_row_count, claimed_at, finished_at, last_signal_date
+        )
+        SELECT
+            CONCAT(?, ':', summary.symbol),
+            summary.symbol,
+            ?,
+            CASE WHEN updates.symbol IS NULL THEN 'skipped' ELSE 'completed' END,
+            summary.source_row_count,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            summary.last_signal_date
+        FROM alpha_source_symbol_summary summary
+        LEFT JOIN alpha_symbols_to_update updates
+            ON updates.symbol = summary.symbol
+        """,
+        [run_id, trigger_value],
+    )
+    connection.execute(
+        """
+        DELETE FROM alpha_trigger_event
+        WHERE trigger_type = ?
+            AND symbol IN (SELECT symbol FROM alpha_symbols_to_update)
+        """,
+        [trigger_value],
+    )
+    connection.execute(
+        """
+        DELETE FROM alpha_trigger_profile
+        WHERE trigger_type = ?
+            AND symbol IN (SELECT symbol FROM alpha_symbols_to_update)
+        """,
+        [trigger_value],
+    )
+    connection.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE alpha_trigger_candidate_rows AS
+        SELECT
+            source.*,
+            LAG(source.high) OVER (PARTITION BY source.symbol ORDER BY source.signal_date) AS previous_high,
+            LAG(source.low) OVER (PARTITION BY source.symbol ORDER BY source.signal_date) AS previous_low,
+            LAG(source.open) OVER (PARTITION BY source.symbol ORDER BY source.signal_date) AS previous_open,
+            LAG(source.close) OVER (PARTITION BY source.symbol ORDER BY source.signal_date) AS previous_close
+        FROM {ALPHA_SOURCE_VIEW_NAME} source
+        INNER JOIN alpha_symbols_to_update updates
+            ON updates.symbol = source.symbol
+        """
+    )
+    status_sql = _trigger_status_sql(trigger_type)
+    where_sql = _trigger_where_sql(trigger_type)
+    connection.execute(
+        f"""
+        INSERT INTO alpha_trigger_event (
+            event_nk, run_id, symbol, signal_date, trigger_type, formal_signal_status, source_bar_dt,
+            wave_id, direction, new_count, no_new_span, life_state, update_rank, stagnation_rank, wave_position_zone
+        )
+        SELECT
+            CONCAT(symbol, ':', ?, ':', CAST(signal_date AS VARCHAR), ':', wave_id),
+            ?,
+            symbol,
+            signal_date,
+            ?,
+            {status_sql},
+            signal_date,
+            wave_id,
+            direction,
+            new_count,
+            no_new_span,
+            life_state,
+            update_rank,
+            stagnation_rank,
+            wave_position_zone
+        FROM alpha_trigger_candidate_rows
+        WHERE {where_sql}
+        """,
+        [trigger_value, run_id, trigger_value],
+    )
+    connection.execute(
+        """
+        INSERT INTO alpha_trigger_profile (
+            profile_nk, run_id, symbol, trigger_type, formal_signal_status, event_count,
+            latest_signal_date, avg_update_rank, avg_stagnation_rank
+        )
+        SELECT
+            CONCAT(symbol, ':', ?, ':', formal_signal_status),
+            ?,
+            symbol,
+            ?,
+            formal_signal_status,
+            COUNT(*),
+            MAX(signal_date),
+            ROUND(AVG(update_rank), 2),
+            ROUND(AVG(stagnation_rank), 2)
+        FROM alpha_trigger_event
+        WHERE run_id = ?
+        GROUP BY symbol, formal_signal_status
+        """,
+        [trigger_value, run_id, trigger_value, run_id],
+    )
     connection.execute(
         """
         INSERT INTO alpha_checkpoint (symbol, trigger_type, last_signal_date, last_run_id, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        SELECT symbol, ?, last_signal_date, ?, CURRENT_TIMESTAMP
+        FROM alpha_symbols_to_update
         ON CONFLICT(symbol, trigger_type) DO UPDATE
         SET
             last_signal_date = excluded.last_signal_date,
             last_run_id = excluded.last_run_id,
             updated_at = excluded.updated_at
         """,
-        [symbol, trigger_type.value, last_signal_date, run_id, updated_at],
+        [trigger_value, run_id],
     )
+    event_rows = connection.execute(
+        "SELECT COUNT(*) FROM alpha_trigger_event WHERE run_id = ?",
+        [run_id],
+    ).fetchone()[0]
+    profile_rows = connection.execute(
+        "SELECT COUNT(*) FROM alpha_trigger_profile WHERE run_id = ?",
+        [run_id],
+    ).fetchone()[0]
+    symbols_updated = connection.execute("SELECT COUNT(*) FROM alpha_symbols_to_update").fetchone()[0]
+    return {"event_rows": int(event_rows), "profile_rows": int(profile_rows)}, int(symbols_updated), latest_signal_date
 
 
-def _load_events_from_trigger_databases(workspace: WorkspaceRoots) -> dict[str, list[TriggerEventRow]]:
-    source_events: dict[str, list[TriggerEventRow]] = {}
-    for trigger_type, attribute_name in TRIGGER_TARGET_PATHS.items():
+def _trigger_status_sql(trigger_type: TriggerType) -> str:
+    if trigger_type is TriggerType.BOF:
+        return "CASE WHEN close >= previous_high THEN 'confirmed' ELSE 'candidate' END"
+    if trigger_type is TriggerType.TST:
+        return "CASE WHEN close >= previous_high AND close >= open THEN 'confirmed' ELSE 'candidate' END"
+    if trigger_type is TriggerType.PB:
+        return "CASE WHEN low >= previous_low THEN 'confirmed' ELSE 'candidate' END"
+    if trigger_type is TriggerType.CPB:
+        return "CASE WHEN close > previous_close THEN 'confirmed' ELSE 'candidate' END"
+    if trigger_type is TriggerType.BPB:
+        return "CASE WHEN low < previous_low THEN 'confirmed' ELSE 'candidate' END"
+    raise ValueError(f"Unsupported trigger type: {trigger_type}")
+
+
+def _trigger_where_sql(trigger_type: TriggerType) -> str:
+    if trigger_type is TriggerType.BOF:
+        return """
+            direction = 'up'
+            AND life_state IN ('alive', 'reborn')
+            AND wave_position_zone IN ('early_progress', 'mature_progress')
+            AND high > previous_high
+        """
+    if trigger_type is TriggerType.TST:
+        return """
+            direction = 'up'
+            AND no_new_span >= 1
+            AND wave_position_zone != 'weak_stagnation'
+            AND low <= previous_high
+        """
+    if trigger_type is TriggerType.PB:
+        return """
+            direction = 'up'
+            AND life_state = 'alive'
+            AND no_new_span >= 1
+            AND wave_position_zone IN ('mature_progress', 'mature_stagnation')
+            AND close < previous_close
+        """
+    if trigger_type is TriggerType.CPB:
+        return """
+            direction = 'up'
+            AND life_state = 'alive'
+            AND no_new_span >= 1
+            AND wave_position_zone IN ('mature_progress', 'mature_stagnation')
+            AND previous_close < previous_open
+            AND close >= open
+        """
+    if trigger_type is TriggerType.BPB:
+        return """
+            direction = 'down'
+            AND life_state IN ('alive', 'reborn')
+            AND no_new_span >= 1
+            AND wave_position_zone IN ('mature_progress', 'mature_stagnation', 'weak_stagnation')
+            AND close < previous_close
+        """
+    raise ValueError(f"Unsupported trigger type: {trigger_type}")
+
+
+def _discover_trigger_event_sources(workspace: WorkspaceRoots) -> dict[str, Path]:
+    source_paths: dict[str, Path] = {}
+    for _trigger_type, attribute_name in TRIGGER_TARGET_PATHS.items():
         database_path: Path = getattr(workspace.databases, attribute_name)
         if not database_path.exists():
             continue
@@ -426,35 +509,12 @@ def _load_events_from_trigger_databases(workspace: WorkspaceRoots) -> dict[str, 
             available_tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
             if "alpha_trigger_event" not in available_tables:
                 continue
-            rows = connection.execute(
-                """
-                SELECT
-                    event_nk, symbol, signal_date, trigger_type, formal_signal_status, source_bar_dt,
-                    wave_id, direction, new_count, no_new_span, life_state, update_rank, stagnation_rank, wave_position_zone
-                FROM alpha_trigger_event
-                ORDER BY symbol, signal_date
-                """
-            ).fetchall()
-            source_events[attribute_name] = [
-                TriggerEventRow(
-                    event_nk=str(event_nk),
-                    symbol=str(symbol),
-                    signal_date=signal_date,
-                    trigger_type=str(trigger_name),
-                    formal_signal_status=str(formal_signal_status),
-                    source_bar_dt=source_bar_dt,
-                    wave_id=str(wave_id),
-                    direction=str(direction),
-                    new_count=int(new_count),
-                    no_new_span=int(no_new_span),
-                    life_state=str(life_state),
-                    update_rank=float(update_rank),
-                    stagnation_rank=float(stagnation_rank),
-                    wave_position_zone=str(wave_position_zone),
-                )
-                for event_nk, symbol, signal_date, trigger_name, formal_signal_status, source_bar_dt, wave_id, direction, new_count, no_new_span, life_state, update_rank, stagnation_rank, wave_position_zone in rows
-            ]
-    return source_events
+        source_paths[attribute_name] = database_path
+    return source_paths
+
+
+def _duckdb_string_literal(path: Path) -> str:
+    return "'" + str(path).replace("'", "''") + "'"
 
 
 def _load_signal_checkpoint_date(
@@ -488,44 +548,4 @@ def _upsert_signal_checkpoint(
             updated_at = excluded.updated_at
         """,
         [source_trigger_db, last_signal_date, run_id, updated_at],
-    )
-
-
-def _insert_signal_rows(
-    *,
-    connection: duckdb.DuckDBPyConnection,
-    run_id: str,
-    rows: list[AlphaSignalRow],
-) -> None:
-    if not rows:
-        return
-    connection.executemany(
-        """
-        INSERT INTO alpha_signal (
-            signal_nk, run_id, symbol, signal_date, trigger_type, formal_signal_status, source_trigger_db,
-            source_trigger_event_nk, wave_id, direction, new_count, no_new_span, life_state,
-            update_rank, stagnation_rank, wave_position_zone
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                row.signal_nk,
-                run_id,
-                row.symbol,
-                row.signal_date,
-                row.trigger_type,
-                row.formal_signal_status,
-                row.source_trigger_db,
-                row.source_trigger_event_nk,
-                row.wave_id,
-                row.direction,
-                row.new_count,
-                row.no_new_span,
-                row.life_state,
-                row.update_rank,
-                row.stagnation_rank,
-                row.wave_position_zone,
-            )
-            for row in rows
-        ],
     )

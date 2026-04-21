@@ -397,6 +397,74 @@ def test_malf_day_runner_reports_progress_and_abandoned_build_artifacts(monkeypa
     assert progress_payload["ledger_rows_written"]["wave_rows"] >= 1
 
 
+def test_malf_day_full_universe_prefers_complete_target_over_stale_building(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_day_source_bars(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+            ("AAA", "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+            ("AAA", "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+        ],
+    )
+    first_summary = run_malf_day_build()
+    assert first_summary.artifact_summary.active_build_path is None
+
+    malf_root = workspace / "data" / "astock_lifespan_alpha" / "malf"
+    stale_building_path = malf_root / "malf_day.day-stale.building.duckdb"
+    stale_building_path.touch()
+    os.utime(stale_building_path, (3, 3))
+
+    second_summary = run_malf_day_build()
+
+    assert second_summary.artifact_summary.active_build_path is None
+    assert second_summary.artifact_summary.promoted_to_target is False
+    assert str(stale_building_path) in second_summary.artifact_summary.abandoned_build_artifacts
+    assert second_summary.checkpoint_summary.symbols_updated == 0
+    assert stale_building_path.exists()
+
+
+def test_malf_day_full_universe_ignores_checkpointed_stale_running_queue(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_day_source_bars(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+            ("AAA", "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+            ("AAA", "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+        ],
+    )
+    run_malf_day_build()
+
+    target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
+    with duckdb.connect(str(target_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO malf_run (
+                run_id, timeframe, status, source_path, message,
+                symbols_seen, symbols_completed
+            )
+            VALUES ('day-stale', 'day', 'running', 'stale-source.duckdb', 'stale run', 0, 0)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO malf_work_queue (
+                queue_id, symbol, timeframe, status, source_bar_count, claimed_at, last_bar_dt
+            )
+            VALUES ('day-stale:AAA', 'AAA', 'day', 'running', 4, CURRENT_TIMESTAMP, TIMESTAMP '2026-01-05 00:00:00')
+            """
+        )
+
+    summary = run_malf_day_build()
+
+    assert summary.artifact_summary.active_build_path is None
+    assert summary.artifact_summary.promoted_to_target is False
+    assert summary.checkpoint_summary.symbols_updated == 0
+
+
 def test_malf_day_runner_backfills_legacy_building_schema(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_day_source_bars(

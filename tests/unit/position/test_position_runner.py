@@ -160,6 +160,30 @@ def test_position_source_reads_stock_daily_adjusted_code_trade_date(monkeypatch,
     assert dataset.rows_by_symbol["AAA"][0].reference_trade_date == date(2026, 1, 3)
 
 
+def test_position_runner_filters_backward_adjust_method(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_daily_adjusted_with_adjust_method(workspace / "data" / "base" / "market_base.duckdb")
+    _write_alpha_signal(workspace / "data" / "astock_lifespan_alpha" / "alpha" / "alpha_signal.duckdb")
+
+    summary = run_position_from_alpha_signal()
+
+    assert summary.materialization_counts["candidate_rows"] == 5
+    assert summary.checkpoint_summary.work_units_seen == 1
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "position" / "position.duckdb"), read_only=True
+    ) as connection:
+        first_reference = connection.execute(
+            """
+            SELECT reference_price
+            FROM position_candidate_audit
+            ORDER BY signal_date, signal_nk
+            LIMIT 1
+            """
+        ).fetchone()[0]
+
+    assert first_reference == 10.8
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))
@@ -229,6 +253,43 @@ def _write_stock_daily_adjusted(database_path: Path) -> None:
         connection.executemany(
             "INSERT INTO stock_daily_adjusted VALUES (?, ?, ?, ?, ?, ?)",
             [(symbol, trade_date, close_price, close_price, close_price, close_price) for symbol, trade_date, close_price in rows],
+        )
+
+
+def _write_stock_daily_adjusted_with_adjust_method(database_path: Path) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    backward_rows = [
+        ("AAA", date(2026, 1, 3), "backward", 10.8),
+        ("AAA", date(2026, 1, 4), "backward", 11.2),
+        ("AAA", date(2026, 1, 5), "backward", 12.3),
+        ("AAA", date(2026, 1, 6), "backward", 12.2),
+        ("AAA", date(2026, 1, 7), "backward", 11.5),
+    ]
+    forward_rows = [
+        (symbol, trade_date, "forward", close_price + 100)
+        for symbol, trade_date, _, close_price in backward_rows
+    ]
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DROP TABLE IF EXISTS stock_daily_adjusted")
+        connection.execute(
+            """
+            CREATE TABLE stock_daily_adjusted (
+                code TEXT,
+                trade_date DATE,
+                adjust_method TEXT,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO stock_daily_adjusted VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (symbol, trade_date, adjust_method, close_price, close_price, close_price, close_price)
+                for symbol, trade_date, adjust_method, close_price in backward_rows + forward_rows
+            ],
         )
 
 

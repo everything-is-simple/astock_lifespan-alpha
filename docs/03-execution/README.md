@@ -165,3 +165,12 @@ Stage-five implementation defaults are frozen for engineering:
 - 正确 active artifact 上的 `100 / 500 / resume / 1000 symbol` proof 已通过
 - 当前 remaining symbols 为 `426`，下一 frontier 为 `688618.SH`
 - 阶段十五不登记 full-universe completion 或阶段九 replay 完成
+
+## 阶段十四 / 阶段九收口补充
+
+- `44` 阶段十四 MALF day full-universe completion 与阶段九 replay 收口
+- `stage-fourteen-malf-day-full-universe-completion-and-stage-nine-replay-closeout` 已完成
+- 当前正式 `malf_day.duckdb` 已接受为正式结果；其与 07:52 backup 在核心业务列上双向 `EXCEPT = 0`
+- `day-fc56...` / `day-d696...building` 相关差异登记为谱系归因偏差，不恢复、不重建
+- alpha / position / trade full-universe replay 已完成 set-based / fast-path 修复
+- 最新 pipeline `pipeline-4a2a2455df18` 已完成 13 步，阶段九 replay 完成登记

@@ -185,12 +185,31 @@ def _target_has_incomplete_work(target_path: Path) -> bool:
         with duckdb.connect(str(target_path), read_only=True) as connection:
             table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
             if "malf_work_queue" in table_names:
-                running_queue_count = connection.execute(
-                    "SELECT COUNT(*) FROM malf_work_queue WHERE status = 'running'"
-                ).fetchone()[0]
+                if "malf_checkpoint" in table_names:
+                    running_queue_count = connection.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM malf_work_queue queue
+                        WHERE queue.status = 'running'
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM malf_checkpoint checkpoint
+                              WHERE checkpoint.symbol = queue.symbol
+                                AND checkpoint.timeframe = queue.timeframe
+                                AND (
+                                    queue.last_bar_dt IS NULL
+                                    OR checkpoint.last_bar_dt >= queue.last_bar_dt
+                                )
+                          )
+                        """
+                    ).fetchone()[0]
+                else:
+                    running_queue_count = connection.execute(
+                        "SELECT COUNT(*) FROM malf_work_queue WHERE status = 'running'"
+                    ).fetchone()[0]
                 if running_queue_count:
                     return True
-            if "malf_run" in table_names:
+            if "malf_run" in table_names and "malf_work_queue" not in table_names:
                 running_run_count = connection.execute(
                     "SELECT COUNT(*) FROM malf_run WHERE status = 'running'"
                 ).fetchone()[0]
@@ -215,6 +234,12 @@ def _resolve_day_build_artifacts(
             reverse=True,
         )
     )
+    if selection.full_universe and target_path.exists() and not _target_has_incomplete_work(target_path):
+        return _DayBuildArtifacts(
+            active_target_path=target_path,
+            active_build_path=None,
+            abandoned_build_artifacts=existing_builds,
+        )
     if selection.resume and existing_builds:
         return _DayBuildArtifacts(
             active_target_path=existing_builds[0],

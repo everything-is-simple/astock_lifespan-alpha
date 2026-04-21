@@ -265,3 +265,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/43-stage-fifteen-malf-day-schema-backfill-compatibility-conclusion-20260419.md`
 - 裁决：`已接受，保留后续 full-universe / replay 门槛`
 - 说明：`stage-fifteen-malf-day-schema-backfill-compatibility` 已完成；旧版真实 `malf_run` 到当前进度合同的 schema backfill 兼容性已修复，`repair_malf_day_schema` 已完成真实 repair/probe，正确 active artifact 上的 `100 / 500 / resume / 1000 symbol` proof 已通过，当前 remaining symbols 为 `426`，full-universe completion 与阶段九 replay 尚未登记完成。
+
+### `44` 阶段十四 MALF day full-universe completion 与阶段九 replay 收口
+
+- 结论文档：`docs/03-execution/44-stage-fourteen-malf-day-full-universe-completion-and-stage-nine-replay-closeout-conclusion-20260421.md`
+- 裁决：`已接受，阶段九 replay 完成`
+- 说明：`stage-fourteen-malf-day-full-universe-completion-and-stage-nine-replay-closeout` 已完成；当前正式 `malf_day.duckdb` 与 07:52 backup 核心业务列零差异，谱系归因偏差已登记；alpha / position / trade replay 已完成 full-universe scalability fix，最新 pipeline `pipeline-4a2a2455df18` 已完成 13 步并收口到 system。
