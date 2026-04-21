@@ -271,3 +271,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/44-stage-fourteen-malf-day-full-universe-completion-and-stage-nine-replay-closeout-conclusion-20260421.md`
 - 裁决：`已接受，阶段九 replay 完成`
 - 说明：`stage-fourteen-malf-day-full-universe-completion-and-stage-nine-replay-closeout` 已完成；当前正式 `malf_day.duckdb` 与 07:52 backup 核心业务列零差异，谱系归因偏差已登记；alpha / position / trade replay 已完成 full-universe scalability fix，最新 pipeline `pipeline-4a2a2455df18` 已完成 13 步并收口到 system。
+## 阶段十六补充
+
+- `45` 阶段十六正式增量与自动续跑规格冻结
+  - `docs/03-execution/45-stage-sixteen-incremental-resume-spec-freeze-conclusion-20260421.md`
+- `46` 阶段十六正式增量与自动续跑工程收口
+  - `docs/03-execution/46-stage-sixteen-incremental-resume-engineering-closeout-conclusion-20260421.md`

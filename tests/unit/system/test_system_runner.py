@@ -4,8 +4,10 @@ from datetime import date
 from pathlib import Path
 
 import duckdb
+import pytest
 
-from astock_lifespan_alpha.system import SystemRunSummary, run_system_from_trade
+from astock_lifespan_alpha.system import SystemRunSummary, repair_system_schema, run_system_from_trade
+from astock_lifespan_alpha.system import runner as system_runner
 from astock_lifespan_alpha.system.schema import SYSTEM_TABLES, initialize_system_schema
 from astock_lifespan_alpha.trade.schema import initialize_trade_schema
 
@@ -53,6 +55,8 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
     assert summary.status == "completed"
     assert summary.readout_rows == 2
     assert summary.summary_rows == 1
+    assert summary.checkpoint_summary.work_units_seen == 2
+    assert summary.checkpoint_summary.work_units_updated == 2
     assert summary.source_paths["trade"] == str(trade_path)
     with duckdb.connect(
         str(workspace / "data" / "astock_lifespan_alpha" / "system" / "system.duckdb"),
@@ -100,6 +104,7 @@ def test_system_runner_handles_missing_trade_database(monkeypatch, tmp_path):
     assert summary.status == "completed"
     assert summary.readout_rows == 0
     assert summary.summary_rows == 0
+    assert summary.checkpoint_summary.work_units_seen == 0
     assert summary.source_paths["trade"] is None
     with duckdb.connect(
         str(workspace / "data" / "astock_lifespan_alpha" / "system" / "system.duckdb"),
@@ -134,6 +139,7 @@ def test_system_runner_rematerializes_portfolio_without_duplicate_readout(monkey
 
     assert first_summary.readout_rows == 1
     assert second_summary.readout_rows == 1
+    assert second_summary.checkpoint_summary.work_units_updated == 0
     with duckdb.connect(
         str(workspace / "data" / "astock_lifespan_alpha" / "system" / "system.duckdb"),
         read_only=True,
@@ -141,10 +147,109 @@ def test_system_runner_rematerializes_portfolio_without_duplicate_readout(monkey
         readout_count = connection.execute("SELECT COUNT(*) FROM system_trade_readout").fetchone()[0]
         summary_count = connection.execute("SELECT COUNT(*) FROM system_portfolio_trade_summary").fetchone()[0]
         run_count = connection.execute("SELECT COUNT(*) FROM system_run").fetchone()[0]
+        queue_rows = connection.execute(
+            "SELECT status, source_row_count FROM system_work_queue ORDER BY requested_at DESC LIMIT 1"
+        ).fetchall()
 
     assert readout_count == 1
     assert summary_count == 1
     assert run_count == 2
+    assert queue_rows == [("reused", 1)]
+
+
+def test_system_runner_rolls_back_failed_partial_rematerialization(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    trade_path = workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"
+    _write_trade_rows(
+        trade_path,
+        [
+            _trade_row(
+                order_intent_nk="intent:filled",
+                order_execution_nk="execution:filled",
+                symbol="AAA",
+                execution_status="filled",
+                executed_weight=0.10,
+                blocking_reason_code=None,
+            )
+        ],
+    )
+
+    run_system_from_trade()
+    with duckdb.connect(str(trade_path)) as connection:
+        connection.execute(
+            """
+            UPDATE trade_order_execution
+            SET executed_weight = 0.05, last_materialized_run_id = 'trade-run-2'
+            WHERE order_execution_nk = 'execution:filled'
+            """
+        )
+
+    system_path = workspace / "data" / "astock_lifespan_alpha" / "system" / "system.duckdb"
+    with duckdb.connect(str(system_path), read_only=True) as connection:
+        before_rows = connection.execute(
+            """
+            SELECT order_execution_nk, executed_weight
+            FROM system_trade_readout
+            ORDER BY order_execution_nk
+            """
+        ).fetchall()
+
+    def fail_checkpoint(*, connection, run_id):
+        raise RuntimeError("checkpoint write failed")
+
+    monkeypatch.setattr(system_runner, "_upsert_system_checkpoint_sql", fail_checkpoint)
+    with pytest.raises(RuntimeError, match="checkpoint write failed"):
+        run_system_from_trade()
+
+    with duckdb.connect(str(system_path), read_only=True) as connection:
+        after_rows = connection.execute(
+            """
+            SELECT order_execution_nk, executed_weight
+            FROM system_trade_readout
+            ORDER BY order_execution_nk
+            """
+        ).fetchall()
+        latest_run = connection.execute(
+            "SELECT status FROM system_run ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()[0]
+
+    assert after_rows == before_rows
+    assert latest_run == "interrupted"
+
+
+def test_repair_system_schema_is_idempotent(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    trade_path = workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"
+    _write_trade_rows(
+        trade_path,
+        [
+            _trade_row(
+                order_intent_nk="intent:filled",
+                order_execution_nk="execution:filled",
+                symbol="AAA",
+                execution_status="filled",
+                executed_weight=0.10,
+                blocking_reason_code=None,
+            )
+        ],
+    )
+
+    run_system_from_trade()
+    system_path = workspace / "data" / "astock_lifespan_alpha" / "system" / "system.duckdb"
+    with duckdb.connect(str(system_path)) as connection:
+        connection.execute("DELETE FROM system_checkpoint")
+
+    first_summary = repair_system_schema()
+    second_summary = repair_system_schema()
+
+    assert first_summary.checkpoint_rows_backfilled == 1
+    assert second_summary.checkpoint_rows_backfilled == 0
+    with duckdb.connect(str(system_path), read_only=True) as connection:
+        checkpoint_rows = connection.execute(
+            "SELECT portfolio_id, symbol FROM system_checkpoint"
+        ).fetchall()
+
+    assert checkpoint_rows == [("core", "AAA")]
 
 
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:

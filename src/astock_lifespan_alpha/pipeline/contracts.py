@@ -40,6 +40,24 @@ class PipelineStepSummary:
 
 
 @dataclass(frozen=True)
+class PipelineResumeSummary:
+    """Serialized resume summary returned by pipeline runners."""
+
+    resumed_from_run_id: str | None
+    resume_start_step: int | None
+    reused_step_count: int
+    executed_step_count: int
+
+    def as_dict(self) -> dict[str, int | str | None]:
+        return {
+            "resumed_from_run_id": self.resumed_from_run_id,
+            "resume_start_step": self.resume_start_step,
+            "reused_step_count": self.reused_step_count,
+            "executed_step_count": self.executed_step_count,
+        }
+
+
+@dataclass(frozen=True)
 class PipelineRunSummary:
     """Stable stage-eight pipeline runner summary."""
 
@@ -51,6 +69,14 @@ class PipelineRunSummary:
     step_count: int
     message: str
     steps: list[PipelineStepSummary] = field(default_factory=list)
+    resume_summary: PipelineResumeSummary = field(
+        default_factory=lambda: PipelineResumeSummary(
+            resumed_from_run_id=None,
+            resume_start_step=None,
+            reused_step_count=0,
+            executed_step_count=0,
+        )
+    )
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -62,5 +88,5 @@ class PipelineRunSummary:
             "step_count": self.step_count,
             "message": self.message,
             "steps": [step.as_dict() for step in self.steps],
+            "resume_summary": self.resume_summary.as_dict(),
         }
-

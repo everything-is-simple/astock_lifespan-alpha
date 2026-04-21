@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,9 +12,9 @@ import duckdb
 from astock_lifespan_alpha.core.paths import WorkspaceRoots, default_settings
 from astock_lifespan_alpha.system.contracts import (
     SYSTEM_CONTRACT_VERSION,
+    SystemCheckpointSummary,
     SystemRunStatus,
     SystemRunSummary,
-    SystemTradeReadoutRecord,
 )
 from astock_lifespan_alpha.system.schema import initialize_system_schema
 
@@ -25,6 +26,7 @@ REQUIRED_TRADE_TABLES = ("trade_order_intent", "trade_order_execution")
 class _SystemTradeSourceMetadata:
     trade_source_path: Path | None
     row_count: int
+    work_unit_count: int
     source_available: bool
 
 
@@ -43,6 +45,8 @@ def run_system_from_trade(
     run_id = f"system-{uuid4().hex[:12]}"
     message = "system run completed."
     summary_rows = 0
+    work_units_updated = 0
+    latest_execution_trade_date: date | None = None
 
     with duckdb.connect(str(target_path)) as connection:
         source = _attach_system_trade_source_view(connection=connection, workspace=workspace, portfolio_id=portfolio_id)
@@ -58,35 +62,62 @@ def run_system_from_trade(
                 str(source.trade_source_path) if source.trade_source_path is not None else None,
             ],
         )
-        _replace_system_portfolio_rows(connection=connection, portfolio_id=portfolio_id)
-        if source.row_count:
-            _insert_system_readout_rows_sql(connection=connection, run_id=run_id)
-            _insert_system_summary(connection=connection, run_id=run_id, portfolio_id=portfolio_id)
-            summary_rows = 1
-        elif not source.source_available:
-            message = "system schema initialized without trade rows."
-        else:
-            message = "system run completed without trade rows for portfolio."
 
-        connection.execute(
-            """
-            UPDATE system_run
-            SET
-                status = ?,
-                readout_rows = ?,
-                summary_rows = ?,
-                message = ?,
-                finished_at = CURRENT_TIMESTAMP
-            WHERE run_id = ?
-            """,
-            [
-                SystemRunStatus.COMPLETED.value,
-                source.row_count,
-                summary_rows,
-                message,
-                run_id,
-            ],
-        )
+        try:
+            connection.execute("DELETE FROM system_work_queue")
+            if source.row_count:
+                _create_system_source_work_unit_summary(connection=connection)
+                if _system_checkpoint_fast_path_available(connection=connection):
+                    work_units_updated, latest_execution_trade_date = _record_reused_system_sql(
+                        connection=connection,
+                        run_id=run_id,
+                    )
+                else:
+                    work_units_updated, latest_execution_trade_date = _materialize_system_sql(
+                        connection=connection,
+                        run_id=run_id,
+                        portfolio_id=portfolio_id,
+                    )
+                summary_rows = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM system_portfolio_trade_summary WHERE portfolio_id = ?",
+                        [portfolio_id],
+                    ).fetchone()[0]
+                )
+            elif not source.source_available:
+                message = "system schema initialized without trade rows."
+            else:
+                message = "system run completed without trade rows for portfolio."
+
+            connection.execute(
+                """
+                UPDATE system_run
+                SET
+                    status = ?,
+                    readout_rows = ?,
+                    summary_rows = ?,
+                    message = ?,
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE run_id = ?
+                """,
+                [
+                    SystemRunStatus.COMPLETED.value,
+                    source.row_count,
+                    summary_rows,
+                    message,
+                    run_id,
+                ],
+            )
+        except Exception as exc:
+            connection.execute(
+                """
+                UPDATE system_run
+                SET status = 'interrupted', message = ?, finished_at = CURRENT_TIMESTAMP
+                WHERE run_id = ? AND finished_at IS NULL
+                """,
+                [f"system run interrupted: {exc}", run_id],
+            )
+            raise
 
     return SystemRunSummary(
         runner_name="run_system_from_trade",
@@ -97,6 +128,13 @@ def run_system_from_trade(
         message=message,
         readout_rows=source.row_count,
         summary_rows=summary_rows,
+        checkpoint_summary=SystemCheckpointSummary(
+            work_units_seen=source.work_unit_count,
+            work_units_updated=work_units_updated,
+            latest_execution_trade_date=latest_execution_trade_date.isoformat()
+            if latest_execution_trade_date is not None
+            else None,
+        ),
     )
 
 
@@ -108,7 +146,7 @@ def _attach_system_trade_source_view(
 ) -> _SystemTradeSourceMetadata:
     trade_path = workspace.databases.trade
     if not trade_path.exists():
-        return _SystemTradeSourceMetadata(trade_source_path=None, row_count=0, source_available=False)
+        return _SystemTradeSourceMetadata(trade_source_path=None, row_count=0, work_unit_count=0, source_available=False)
 
     connection.execute(f"ATTACH {_duckdb_string_literal(trade_path)} AS system_trade_source (READ_ONLY)")
     available_tables = {
@@ -118,7 +156,12 @@ def _attach_system_trade_source_view(
         ).fetchall()
     }
     if not set(REQUIRED_TRADE_TABLES).issubset(available_tables):
-        return _SystemTradeSourceMetadata(trade_source_path=trade_path, row_count=0, source_available=False)
+        return _SystemTradeSourceMetadata(
+            trade_source_path=trade_path,
+            row_count=0,
+            work_unit_count=0,
+            source_available=False,
+        )
 
     portfolio_id_literal = _duckdb_string_literal(portfolio_id)
     connection.execute(
@@ -148,137 +191,372 @@ def _attach_system_trade_source_view(
         WHERE intent.portfolio_id = {portfolio_id_literal}
         """
     )
-    row_count = connection.execute("SELECT COUNT(*) FROM system_trade_source_rows").fetchone()[0]
-    return _SystemTradeSourceMetadata(trade_source_path=trade_path, row_count=int(row_count), source_available=True)
+    row_count, work_unit_count = connection.execute(
+        "SELECT COUNT(*), COUNT(DISTINCT portfolio_id || ':' || symbol) FROM system_trade_source_rows"
+    ).fetchone()
+    return _SystemTradeSourceMetadata(
+        trade_source_path=trade_path,
+        row_count=int(row_count),
+        work_unit_count=int(work_unit_count),
+        source_available=True,
+    )
 
 
-def _replace_system_portfolio_rows(*, connection: duckdb.DuckDBPyConnection, portfolio_id: str) -> None:
-    connection.execute("DELETE FROM system_trade_readout WHERE portfolio_id = ?", [portfolio_id])
-    connection.execute("DELETE FROM system_portfolio_trade_summary WHERE portfolio_id = ?", [portfolio_id])
-
-
-def _insert_system_readout_rows_sql(
-    *,
-    connection: duckdb.DuckDBPyConnection,
-    run_id: str,
-) -> None:
+def _create_system_source_work_unit_summary(*, connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(
         """
-        INSERT INTO system_trade_readout (
-            system_readout_nk, order_intent_nk, order_execution_nk, portfolio_id, symbol,
-            reference_trade_date, planned_trade_date, execution_trade_date,
-            position_action_decision, intent_status, execution_status,
-            requested_weight, admitted_weight, execution_weight, executed_weight,
-            execution_price, blocking_reason_code, source_price_line,
-            system_contract_version, last_materialized_run_id
-        )
+        CREATE OR REPLACE TEMP TABLE system_source_work_unit_summary AS
         SELECT
-            'system:' || order_execution_nk AS system_readout_nk,
-            order_intent_nk,
-            order_execution_nk,
             portfolio_id,
             symbol,
-            reference_trade_date,
-            planned_trade_date,
-            execution_trade_date,
-            position_action_decision,
-            intent_status,
-            execution_status,
-            requested_weight,
-            admitted_weight,
-            execution_weight,
-            executed_weight,
-            execution_price,
-            blocking_reason_code,
-            source_price_line,
-            ? AS system_contract_version,
-            ? AS last_materialized_run_id
+            COUNT(*) AS source_row_count,
+            MAX(execution_trade_date) AS latest_execution_trade_date,
+            md5(
+                string_agg(
+                    CONCAT(
+                        order_intent_nk,
+                        '|',
+                        order_execution_nk,
+                        '|',
+                        portfolio_id,
+                        '|',
+                        symbol,
+                        '|',
+                        COALESCE(CAST(reference_trade_date AS VARCHAR), ''),
+                        '|',
+                        COALESCE(CAST(planned_trade_date AS VARCHAR), ''),
+                        '|',
+                        COALESCE(CAST(execution_trade_date AS VARCHAR), ''),
+                        '|',
+                        position_action_decision,
+                        '|',
+                        intent_status,
+                        '|',
+                        execution_status,
+                        '|',
+                        CAST(requested_weight AS VARCHAR),
+                        '|',
+                        CAST(admitted_weight AS VARCHAR),
+                        '|',
+                        CAST(execution_weight AS VARCHAR),
+                        '|',
+                        CAST(executed_weight AS VARCHAR),
+                        '|',
+                        COALESCE(CAST(execution_price AS VARCHAR), ''),
+                        '|',
+                        COALESCE(blocking_reason_code, ''),
+                        '|',
+                        source_price_line
+                    )
+                    ORDER BY execution_trade_date, order_execution_nk
+                )
+            ) AS source_fingerprint
         FROM system_trade_source_rows
-        ORDER BY portfolio_id, symbol, execution_trade_date, order_execution_nk
-        """,
-        [SYSTEM_CONTRACT_VERSION, run_id],
+        GROUP BY portfolio_id, symbol
+        """
     )
 
 
-def _insert_system_readout_rows(
+def _system_checkpoint_fast_path_available(*, connection: duckdb.DuckDBPyConnection) -> bool:
+    row = connection.execute(
+        """
+        WITH existing_counts AS (
+            SELECT portfolio_id, symbol, COUNT(*) AS existing_row_count
+            FROM system_trade_readout
+            GROUP BY portfolio_id, symbol
+        )
+        SELECT
+            COUNT(*) AS work_unit_count,
+            SUM(
+                CASE
+                    WHEN checkpoint.portfolio_id IS NOT NULL
+                        AND checkpoint.latest_execution_trade_date IS NOT DISTINCT FROM source.latest_execution_trade_date
+                        AND checkpoint.last_source_fingerprint = source.source_fingerprint
+                        AND COALESCE(existing.existing_row_count, 0) = source.source_row_count
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS matching_work_units
+        FROM system_source_work_unit_summary AS source
+        LEFT JOIN system_checkpoint AS checkpoint
+            ON checkpoint.portfolio_id = source.portfolio_id
+            AND checkpoint.symbol = source.symbol
+        LEFT JOIN existing_counts AS existing
+            ON existing.portfolio_id = source.portfolio_id
+            AND existing.symbol = source.symbol
+        """
+    ).fetchone()
+    return int(row[0] or 0) > 0 and int(row[0] or 0) == int(row[1] or 0)
+
+
+def _record_reused_system_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
-    rows: list[SystemTradeReadoutRecord],
-) -> None:
-    connection.executemany(
+) -> tuple[int, date | None]:
+    connection.execute(
         """
-        INSERT INTO system_trade_readout (
-            system_readout_nk, order_intent_nk, order_execution_nk, portfolio_id, symbol,
-            reference_trade_date, planned_trade_date, execution_trade_date,
-            position_action_decision, intent_status, execution_status,
-            requested_weight, admitted_weight, execution_weight, executed_weight,
-            execution_price, blocking_reason_code, source_price_line,
-            system_contract_version, last_materialized_run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                row.system_readout_nk,
-                row.order_intent_nk,
-                row.order_execution_nk,
-                row.portfolio_id,
-                row.symbol,
-                row.reference_trade_date,
-                row.planned_trade_date,
-                row.execution_trade_date,
-                row.position_action_decision,
-                row.intent_status,
-                row.execution_status,
-                row.requested_weight,
-                row.admitted_weight,
-                row.execution_weight,
-                row.executed_weight,
-                row.execution_price,
-                row.blocking_reason_code,
-                row.source_price_line,
-                SYSTEM_CONTRACT_VERSION,
-                run_id,
-            )
-            for row in rows
-        ],
+        CREATE OR REPLACE TEMP TABLE system_source_work_unit_reused AS
+        SELECT
+            portfolio_id,
+            symbol,
+            source_row_count,
+            latest_execution_trade_date,
+            source_fingerprint,
+            'reused' AS status
+        FROM system_source_work_unit_summary
+        """
     )
+    try:
+        connection.execute("BEGIN TRANSACTION")
+        _insert_system_work_queue_sql(connection=connection, run_id=run_id, status_table_name="system_source_work_unit_reused")
+        _upsert_system_checkpoint_sql(connection=connection, run_id=run_id)
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+    latest_execution_trade_date = connection.execute(
+        "SELECT MAX(latest_execution_trade_date) FROM system_source_work_unit_summary"
+    ).fetchone()[0]
+    return 0, latest_execution_trade_date
 
 
-def _insert_system_summary(
+def _materialize_system_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
     portfolio_id: str,
-) -> None:
+) -> tuple[int, date | None]:
     connection.execute(
         """
-        INSERT INTO system_portfolio_trade_summary (
+        CREATE OR REPLACE TEMP TABLE system_existing_readout_counts AS
+        SELECT portfolio_id, symbol, COUNT(*) AS existing_row_count
+        FROM system_trade_readout
+        WHERE portfolio_id = ?
+        GROUP BY portfolio_id, symbol
+        """,
+        [portfolio_id],
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE system_work_units_to_update AS
+        SELECT source.portfolio_id, source.symbol
+        FROM system_source_work_unit_summary AS source
+        LEFT JOIN system_checkpoint AS checkpoint
+            ON checkpoint.portfolio_id = source.portfolio_id
+            AND checkpoint.symbol = source.symbol
+        LEFT JOIN system_existing_readout_counts AS existing
+            ON existing.portfolio_id = source.portfolio_id
+            AND existing.symbol = source.symbol
+        WHERE checkpoint.portfolio_id IS NULL
+            OR checkpoint.latest_execution_trade_date IS DISTINCT FROM source.latest_execution_trade_date
+            OR checkpoint.last_source_fingerprint IS DISTINCT FROM source.source_fingerprint
+            OR COALESCE(existing.existing_row_count, 0) != source.source_row_count
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE system_source_work_unit_reused AS
+        SELECT
+            source.portfolio_id,
+            source.symbol,
+            source.source_row_count,
+            source.latest_execution_trade_date,
+            source.source_fingerprint,
+            'reused' AS status
+        FROM system_source_work_unit_summary AS source
+        LEFT JOIN system_work_units_to_update AS updates
+            ON updates.portfolio_id = source.portfolio_id
+            AND updates.symbol = source.symbol
+        WHERE updates.symbol IS NULL
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE system_source_work_unit_completed AS
+        SELECT
+            source.portfolio_id,
+            source.symbol,
+            source.source_row_count,
+            source.latest_execution_trade_date,
+            source.source_fingerprint,
+            'completed' AS status
+        FROM system_source_work_unit_summary AS source
+        INNER JOIN system_work_units_to_update AS updates
+            ON updates.portfolio_id = source.portfolio_id
+            AND updates.symbol = source.symbol
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE system_materialized_readout AS
+        SELECT
+            'system:' || source.order_execution_nk AS system_readout_nk,
+            source.order_intent_nk,
+            source.order_execution_nk,
+            source.portfolio_id,
+            source.symbol,
+            source.reference_trade_date,
+            source.planned_trade_date,
+            source.execution_trade_date,
+            source.position_action_decision,
+            source.intent_status,
+            source.execution_status,
+            source.requested_weight,
+            source.admitted_weight,
+            source.execution_weight,
+            source.executed_weight,
+            source.execution_price,
+            source.blocking_reason_code,
+            source.source_price_line,
+            ? AS system_contract_version,
+            ? AS last_materialized_run_id
+        FROM system_trade_source_rows AS source
+        INNER JOIN system_work_units_to_update AS updates
+            ON updates.portfolio_id = source.portfolio_id
+            AND updates.symbol = source.symbol
+        ORDER BY source.portfolio_id, source.symbol, source.execution_trade_date, source.order_execution_nk
+        """,
+        [SYSTEM_CONTRACT_VERSION, run_id],
+    )
+    try:
+        connection.execute("BEGIN TRANSACTION")
+        connection.execute(
+            """
+            DELETE FROM system_trade_readout
+            WHERE portfolio_id = ?
+                AND symbol IN (SELECT symbol FROM system_work_units_to_update)
+            """,
+            [portfolio_id],
+        )
+        connection.execute(
+            """
+            INSERT INTO system_trade_readout (
+                system_readout_nk, order_intent_nk, order_execution_nk, portfolio_id, symbol,
+                reference_trade_date, planned_trade_date, execution_trade_date,
+                position_action_decision, intent_status, execution_status,
+                requested_weight, admitted_weight, execution_weight, executed_weight,
+                execution_price, blocking_reason_code, source_price_line,
+                system_contract_version, last_materialized_run_id
+            )
+            SELECT
+                system_readout_nk,
+                order_intent_nk,
+                order_execution_nk,
+                portfolio_id,
+                symbol,
+                reference_trade_date,
+                planned_trade_date,
+                execution_trade_date,
+                position_action_decision,
+                intent_status,
+                execution_status,
+                requested_weight,
+                admitted_weight,
+                execution_weight,
+                executed_weight,
+                execution_price,
+                blocking_reason_code,
+                source_price_line,
+                system_contract_version,
+                last_materialized_run_id
+            FROM system_materialized_readout
+            """
+        )
+        _insert_system_work_queue_sql(connection=connection, run_id=run_id, status_table_name="system_source_work_unit_reused")
+        _insert_system_work_queue_sql(connection=connection, run_id=run_id, status_table_name="system_source_work_unit_completed")
+        _upsert_system_checkpoint_sql(connection=connection, run_id=run_id)
+        connection.execute("DELETE FROM system_portfolio_trade_summary WHERE portfolio_id = ?", [portfolio_id])
+        connection.execute(
+            """
+            INSERT INTO system_portfolio_trade_summary (
+                portfolio_id,
+                execution_count,
+                filled_count,
+                rejected_count,
+                symbol_count,
+                gross_executed_weight,
+                latest_execution_trade_date,
+                system_contract_version,
+                last_materialized_run_id
+            )
+            SELECT
+                portfolio_id,
+                COUNT(*) AS execution_count,
+                SUM(CASE WHEN execution_status = 'filled' THEN 1 ELSE 0 END) AS filled_count,
+                SUM(CASE WHEN execution_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+                COUNT(DISTINCT symbol) AS symbol_count,
+                SUM(ABS(executed_weight)) AS gross_executed_weight,
+                MAX(execution_trade_date) AS latest_execution_trade_date,
+                ? AS system_contract_version,
+                ? AS last_materialized_run_id
+            FROM system_trade_readout
+            WHERE portfolio_id = ?
+            GROUP BY portfolio_id
+            """,
+            [SYSTEM_CONTRACT_VERSION, run_id, portfolio_id],
+        )
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+    work_units_updated = int(connection.execute("SELECT COUNT(*) FROM system_work_units_to_update").fetchone()[0])
+    latest_execution_trade_date = connection.execute(
+        "SELECT MAX(latest_execution_trade_date) FROM system_source_work_unit_summary"
+    ).fetchone()[0]
+    return work_units_updated, latest_execution_trade_date
+
+
+def _insert_system_work_queue_sql(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    status_table_name: str,
+) -> None:
+    connection.execute(
+        f"""
+        INSERT INTO system_work_queue (
+            queue_id, portfolio_id, symbol, status, source_row_count,
+            latest_execution_trade_date, source_fingerprint, claimed_at, finished_at
+        )
+        SELECT
+            CONCAT(?, ':', portfolio_id, ':', symbol),
             portfolio_id,
-            execution_count,
-            filled_count,
-            rejected_count,
-            symbol_count,
-            gross_executed_weight,
+            symbol,
+            status,
+            source_row_count,
             latest_execution_trade_date,
-            system_contract_version,
-            last_materialized_run_id
+            source_fingerprint,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM {status_table_name}
+        """,
+        [run_id],
+    )
+
+
+def _upsert_system_checkpoint_sql(*, connection: duckdb.DuckDBPyConnection, run_id: str) -> None:
+    connection.execute(
+        """
+        INSERT INTO system_checkpoint (
+            portfolio_id, symbol, latest_execution_trade_date, last_source_fingerprint, last_run_id, updated_at
         )
         SELECT
             portfolio_id,
-            COUNT(*) AS execution_count,
-            SUM(CASE WHEN execution_status = 'filled' THEN 1 ELSE 0 END) AS filled_count,
-            SUM(CASE WHEN execution_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
-            COUNT(DISTINCT symbol) AS symbol_count,
-            SUM(ABS(executed_weight)) AS gross_executed_weight,
-            MAX(execution_trade_date) AS latest_execution_trade_date,
-            ? AS system_contract_version,
-            ? AS last_materialized_run_id
-        FROM system_trade_readout
-        WHERE portfolio_id = ?
-        GROUP BY portfolio_id
+            symbol,
+            latest_execution_trade_date,
+            source_fingerprint,
+            ?,
+            CURRENT_TIMESTAMP
+        FROM system_source_work_unit_summary
+        ON CONFLICT(portfolio_id, symbol) DO UPDATE
+        SET
+            latest_execution_trade_date = excluded.latest_execution_trade_date,
+            last_source_fingerprint = excluded.last_source_fingerprint,
+            last_run_id = excluded.last_run_id,
+            updated_at = excluded.updated_at
         """,
-        [SYSTEM_CONTRACT_VERSION, run_id, portfolio_id],
+        [run_id],
     )
 
 

@@ -174,3 +174,9 @@ Stage-five implementation defaults are frozen for engineering:
 - `day-fc56...` / `day-d696...building` 相关差异登记为谱系归因偏差，不恢复、不重建
 - alpha / position / trade full-universe replay 已完成 set-based / fast-path 修复
 - 最新 pipeline `pipeline-4a2a2455df18` 已完成 13 步，阶段九 replay 完成登记
+## 阶段十六补充
+
+- `45` 阶段十六正式增量与自动续跑规格冻结
+- `46` 阶段十六正式增量与自动续跑工程收口
+- `stage-sixteen-incremental-resume` 已完成工程收口与真实 proof
+- `portfolio_plan / system / pipeline` 已补齐正式增量与 step 级自动续跑契约

@@ -9,6 +9,8 @@ import duckdb
 
 PORTFOLIO_PLAN_TABLES = (
     "portfolio_plan_run",
+    "portfolio_plan_work_queue",
+    "portfolio_plan_checkpoint",
     "portfolio_plan_snapshot",
     "portfolio_plan_run_snapshot",
 )
@@ -34,6 +36,32 @@ def initialize_portfolio_plan_schema(database_path: Path) -> None:
                 message TEXT,
                 started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 finished_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_plan_work_queue (
+                queue_id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_row_count BIGINT NOT NULL DEFAULT 0,
+                last_reference_trade_date DATE,
+                source_fingerprint TEXT,
+                requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                claimed_at TIMESTAMP,
+                finished_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_plan_checkpoint (
+                portfolio_id TEXT PRIMARY KEY,
+                last_reference_trade_date DATE,
+                last_source_fingerprint TEXT,
+                last_run_id TEXT,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -77,4 +105,7 @@ def initialize_portfolio_plan_schema(database_path: Path) -> None:
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_portfolio_plan_snapshot_portfolio ON portfolio_plan_snapshot(portfolio_id, reference_trade_date)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_portfolio_plan_run_snapshot_run ON portfolio_plan_run_snapshot(run_id, plan_status)"
         )

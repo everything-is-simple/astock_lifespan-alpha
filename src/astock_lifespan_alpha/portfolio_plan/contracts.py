@@ -13,6 +13,22 @@ class PortfolioPlanStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class PortfolioPlanCheckpointSummary:
+    """Serialized checkpoint summary returned by portfolio plan runners."""
+
+    work_units_seen: int
+    work_units_updated: int
+    latest_reference_trade_date: str | None
+
+    def as_dict(self) -> dict[str, int | str | None]:
+        return {
+            "work_units_seen": self.work_units_seen,
+            "work_units_updated": self.work_units_updated,
+            "latest_reference_trade_date": self.latest_reference_trade_date,
+        }
+
+
+@dataclass(frozen=True)
 class PortfolioPlanRunSummary:
     """Stable stage-four portfolio plan runner summary."""
 
@@ -23,6 +39,13 @@ class PortfolioPlanRunSummary:
     source_paths: dict[str, str | None]
     message: str
     materialization_counts: dict[str, int] = field(default_factory=dict)
+    checkpoint_summary: PortfolioPlanCheckpointSummary = field(
+        default_factory=lambda: PortfolioPlanCheckpointSummary(
+            work_units_seen=0,
+            work_units_updated=0,
+            latest_reference_trade_date=None,
+        )
+    )
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -33,4 +56,5 @@ class PortfolioPlanRunSummary:
             "source_paths": dict(self.source_paths),
             "message": self.message,
             "materialization_counts": dict(self.materialization_counts),
+            "checkpoint_summary": self.checkpoint_summary.as_dict(),
         }

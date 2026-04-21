@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
@@ -17,6 +17,22 @@ class SystemRunStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class SystemCheckpointSummary:
+    """Serialized checkpoint summary returned by system runners."""
+
+    work_units_seen: int
+    work_units_updated: int
+    latest_execution_trade_date: str | None
+
+    def as_dict(self) -> dict[str, int | str | None]:
+        return {
+            "work_units_seen": self.work_units_seen,
+            "work_units_updated": self.work_units_updated,
+            "latest_execution_trade_date": self.latest_execution_trade_date,
+        }
+
+
+@dataclass(frozen=True)
 class SystemRunSummary:
     """Stable stage-six system runner summary."""
 
@@ -28,6 +44,13 @@ class SystemRunSummary:
     message: str
     readout_rows: int
     summary_rows: int
+    checkpoint_summary: SystemCheckpointSummary = field(
+        default_factory=lambda: SystemCheckpointSummary(
+            work_units_seen=0,
+            work_units_updated=0,
+            latest_execution_trade_date=None,
+        )
+    )
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -39,6 +62,7 @@ class SystemRunSummary:
             "message": self.message,
             "readout_rows": self.readout_rows,
             "summary_rows": self.summary_rows,
+            "checkpoint_summary": self.checkpoint_summary.as_dict(),
         }
 
 
@@ -64,4 +88,3 @@ class SystemTradeReadoutRecord:
     execution_price: float | None
     blocking_reason_code: str | None
     source_price_line: str
-

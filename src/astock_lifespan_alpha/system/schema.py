@@ -9,6 +9,8 @@ import duckdb
 
 SYSTEM_TABLES = (
     "system_run",
+    "system_work_queue",
+    "system_checkpoint",
     "system_trade_readout",
     "system_portfolio_trade_summary",
 )
@@ -31,6 +33,35 @@ def initialize_system_schema(database_path: Path) -> None:
                 message TEXT,
                 started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 finished_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_work_queue (
+                queue_id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_row_count BIGINT NOT NULL DEFAULT 0,
+                latest_execution_trade_date DATE,
+                source_fingerprint TEXT,
+                requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                claimed_at TIMESTAMP,
+                finished_at TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_checkpoint (
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                latest_execution_trade_date DATE,
+                last_source_fingerprint TEXT,
+                last_run_id TEXT,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (portfolio_id, symbol)
             )
             """
         )
@@ -82,4 +113,3 @@ def initialize_system_schema(database_path: Path) -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_system_trade_readout_portfolio ON system_trade_readout(portfolio_id, execution_trade_date)"
         )
-

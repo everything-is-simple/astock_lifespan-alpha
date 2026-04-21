@@ -10,6 +10,7 @@ import duckdb
 PIPELINE_TABLES = (
     "pipeline_run",
     "pipeline_step_run",
+    "pipeline_step_checkpoint",
 )
 
 
@@ -48,4 +49,20 @@ def initialize_pipeline_schema(database_path: Path) -> None:
             )
             """
         )
-
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_step_checkpoint (
+                portfolio_id TEXT NOT NULL,
+                step_order BIGINT NOT NULL,
+                runner_name TEXT NOT NULL,
+                runner_run_id TEXT NOT NULL,
+                runner_status TEXT NOT NULL,
+                target_path TEXT,
+                message TEXT,
+                summary_json TEXT NOT NULL,
+                last_pipeline_run_id TEXT NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (portfolio_id, step_order)
+            )
+            """
+        )
