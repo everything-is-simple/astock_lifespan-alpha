@@ -14,18 +14,18 @@
 
 本轮治理面板确认：
 
-- 当前活跃模块是 `portfolio_plan`
+- 当前活跃模块切换为 `trade`
 - `position` 当前状态是 `放行`
-- `portfolio_plan` 当前状态是 `待修`
+- `portfolio_plan` 当前状态是 `放行`
 - `pipeline` 仍只承担 orchestration gate，不承担业务模块健康证明
 
 ## 当前面板
 
 | 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻断原因/备注 |
 | --- | --- | --- | --- | --- |
-| `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `portfolio_plan` gate | 已完成 live cutover，本轮不写 `冻结` |
-| `portfolio_plan` | `待修` | `2026-04-22 portfolio_plan Card 50 regate` | 继续压缩 committed replace 尾段后重跑正式 `0.50` gate | 已完成按日分批 slow path 与 progress logging，但最新 `0.50` run 仍未完成最终提交 |
-| `trade` | `待测` | `stage-five engineering closeout` | 等待 `portfolio_plan` 放行 | 等待上游 |
+| `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `trade` gate | 已完成 live cutover，本轮不写 `冻结` |
+| `portfolio_plan` | `放行` | `2026-04-22 portfolio_plan Card 50 regate` | 保持正式 `0.50` live snapshot，等待下游 gate | 最新正式 run `portfolio-plan-68ab0db998ad` 已 `completed`，正式 snapshot 已切到 `0.50` |
+| `trade` | `待测` | `stage-five engineering closeout` | 进入下一轮 freeze gate | 上游 `portfolio_plan` 已放行 |
 | `system` | `待测` | `stage-six engineering closeout` | 等待 `trade` 放行 | 等待上游 |
 | `pipeline` | `待测` | `stage-sixteen incremental resume` | 等待业务模块放行后验收 | orchestration-only |
 | `alpha` | `待测` | `stage-three closeout` | 后置冻结审计 | 本轮不主动开修 |

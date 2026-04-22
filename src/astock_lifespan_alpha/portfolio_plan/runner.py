@@ -23,6 +23,8 @@ from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_pla
 
 PORTFOLIO_PLAN_CONTRACT_VERSION = "stage4_portfolio_plan_v2"
 PORTFOLIO_PLAN_PROGRESS_UPDATE_INTERVAL = 100
+PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE = "portfolio_plan_snapshot_stage"
+PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE = "portfolio_plan_snapshot_backup"
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,11 @@ def run_portfolio_plan_build(
                     connection=connection,
                     portfolio_id=portfolio_id,
                     portfolio_gross_cap_weight=portfolio_gross_cap_weight,
+                )
+                _cleanup_portfolio_plan_cutover_artifacts_sql(
+                    connection=connection,
+                    run_id=run_id,
+                    preserve_run_snapshot=False,
                 )
                 if _portfolio_plan_checkpoint_fast_path_available(connection=connection, portfolio_id=portfolio_id):
                     counts, work_units_updated, latest_reference_trade_date = _record_reused_portfolio_plan_sql(
@@ -746,23 +753,18 @@ def _materialize_portfolio_plan_sql(
         """
     )
     phase_seconds["materialized_with_action_seconds"] = perf_counter() - phase_started
-    _update_portfolio_plan_run_message_sql(
-        connection=connection,
-        run_id=run_id,
-        message="portfolio_plan slow path built materialized_with_action. Starting committed snapshot replace.",
-    )
-    phase_started = perf_counter()
+    cutover_warning = ""
     try:
-        connection.execute("BEGIN TRANSACTION")
-        connection.execute("DELETE FROM portfolio_plan_snapshot WHERE portfolio_id = ?", [portfolio_id])
         _update_portfolio_plan_run_message_sql(
             connection=connection,
             run_id=run_id,
-            message="portfolio_plan committed replace: old snapshot deleted; inserting new snapshot rows.",
+            message="portfolio_plan slow path built materialized_with_action. snapshot_stage_loading",
         )
+        phase_started = perf_counter()
+        _create_portfolio_plan_snapshot_stage_sql(connection=connection)
         connection.execute(
-            """
-            INSERT INTO portfolio_plan_snapshot (
+            f"""
+            INSERT INTO {PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE} (
                 plan_snapshot_nk, candidate_nk, portfolio_id, symbol, reference_trade_date,
                 planned_entry_trade_date, scheduled_exit_trade_date, position_action_decision,
                 requested_weight, admitted_weight, trimmed_weight,
@@ -798,11 +800,18 @@ def _materialize_portfolio_plan_sql(
             """,
             [run_id, run_id],
         )
+        phase_seconds["stage_snapshot_seconds"] = perf_counter() - phase_started
         _update_portfolio_plan_run_message_sql(
             connection=connection,
             run_id=run_id,
-            message="portfolio_plan committed replace: snapshot inserted; writing run_snapshot rows.",
+            message=(
+                "portfolio_plan slow path built materialized_with_action. "
+                f"snapshot_stage_loaded rows={materialized_rows}"
+            ),
         )
+
+        phase_started = perf_counter()
+        connection.execute("DELETE FROM portfolio_plan_run_snapshot WHERE run_id = ?", [run_id])
         connection.execute(
             """
             INSERT INTO portfolio_plan_run_snapshot (
@@ -813,18 +822,75 @@ def _materialize_portfolio_plan_sql(
             """,
             [run_id],
         )
+        phase_seconds["stage_run_snapshot_seconds"] = perf_counter() - phase_started
         _update_portfolio_plan_run_message_sql(
             connection=connection,
             run_id=run_id,
-            message="portfolio_plan committed replace: run_snapshot inserted; updating work_queue and checkpoint.",
+            message="portfolio_plan slow path built materialized_with_action. run_snapshot_prewrite_loaded",
         )
-        _insert_portfolio_plan_work_queue_sql(connection=connection, run_id=run_id, status="completed")
-        _upsert_portfolio_plan_checkpoint_sql(connection=connection, run_id=run_id)
-        connection.execute("COMMIT")
+
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message="portfolio_plan slow path built materialized_with_action. cutover_started",
+        )
+        phase_started = perf_counter()
+        try:
+            connection.execute("BEGIN TRANSACTION")
+            connection.execute("DROP INDEX IF EXISTS idx_portfolio_plan_snapshot_portfolio")
+            connection.execute(
+                f"ALTER TABLE portfolio_plan_snapshot RENAME TO {PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE}"
+            )
+            connection.execute(
+                f"ALTER TABLE {PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE} RENAME TO portfolio_plan_snapshot"
+            )
+            _insert_portfolio_plan_work_queue_sql(connection=connection, run_id=run_id, status="completed")
+            _upsert_portfolio_plan_checkpoint_sql(connection=connection, run_id=run_id)
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        phase_seconds["cutover_seconds"] = perf_counter() - phase_started
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message="portfolio_plan slow path built materialized_with_action. cutover_committed",
+        )
     except Exception:
-        connection.execute("ROLLBACK")
+        _cleanup_portfolio_plan_cutover_artifacts_sql(
+            connection=connection,
+            run_id=run_id,
+            preserve_run_snapshot=False,
+        )
         raise
-    phase_seconds["commit_seconds"] = perf_counter() - phase_started
+
+    phase_started = perf_counter()
+    try:
+        if _table_exists(connection=connection, table_name=PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE):
+            connection.execute(f"DROP TABLE {PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE}")
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_portfolio_plan_snapshot_portfolio
+            ON portfolio_plan_snapshot(portfolio_id, reference_trade_date)
+            """
+        )
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message="portfolio_plan slow path built materialized_with_action. backup_dropped",
+        )
+    except Exception as exc:
+        cutover_warning = f" cleanup_warning={exc}"
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message=(
+                "portfolio_plan slow path built materialized_with_action. "
+                f"backup_dropped warning={exc}"
+            ),
+        )
+    phase_seconds["backup_drop_seconds"] = perf_counter() - phase_started
+
     status_counts = dict(
         connection.execute(
             """
@@ -858,7 +924,11 @@ def _materialize_portfolio_plan_sql(
             f"materialize_batches_seconds={phase_seconds['materialize_batches_seconds']:.3f}, "
             f"materialized_index_seconds={phase_seconds['materialized_index_seconds']:.3f}, "
             f"materialized_with_action_seconds={phase_seconds['materialized_with_action_seconds']:.3f}, "
-            f"commit_seconds={phase_seconds['commit_seconds']:.3f}}}"
+            f"stage_snapshot_seconds={phase_seconds['stage_snapshot_seconds']:.3f}, "
+            f"stage_run_snapshot_seconds={phase_seconds['stage_run_snapshot_seconds']:.3f}, "
+            f"cutover_seconds={phase_seconds['cutover_seconds']:.3f}, "
+            f"backup_drop_seconds={phase_seconds['backup_drop_seconds']:.3f}}}"
+            f"{cutover_warning}"
         ),
     )
 
@@ -914,6 +984,76 @@ def _upsert_portfolio_plan_checkpoint_sql(*, connection: duckdb.DuckDBPyConnecti
     )
 
 
+def _create_portfolio_plan_snapshot_stage_sql(*, connection: duckdb.DuckDBPyConnection) -> None:
+    connection.execute(f"DROP TABLE IF EXISTS {PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE}")
+    connection.execute(
+        f"""
+        CREATE TABLE {PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE} (
+            plan_snapshot_nk TEXT PRIMARY KEY,
+            candidate_nk TEXT NOT NULL,
+            portfolio_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            reference_trade_date DATE,
+            planned_entry_trade_date DATE,
+            scheduled_exit_trade_date DATE,
+            position_action_decision TEXT NOT NULL,
+            requested_weight DOUBLE NOT NULL,
+            admitted_weight DOUBLE NOT NULL,
+            trimmed_weight DOUBLE NOT NULL,
+            plan_status TEXT NOT NULL,
+            blocking_reason_code TEXT,
+            planned_exit_reason_code TEXT,
+            portfolio_gross_cap_weight DOUBLE NOT NULL,
+            current_portfolio_gross_weight DOUBLE NOT NULL DEFAULT 0,
+            remaining_portfolio_capacity_weight DOUBLE NOT NULL DEFAULT 0,
+            portfolio_gross_used_weight DOUBLE NOT NULL,
+            portfolio_gross_remaining_weight DOUBLE NOT NULL,
+            portfolio_plan_contract_version TEXT NOT NULL,
+            first_seen_run_id TEXT NOT NULL,
+            last_materialized_run_id TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _cleanup_portfolio_plan_cutover_artifacts_sql(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    preserve_run_snapshot: bool,
+) -> None:
+    if not preserve_run_snapshot:
+        connection.execute("DELETE FROM portfolio_plan_run_snapshot WHERE run_id = ?", [run_id])
+
+    stage_exists = _table_exists(connection=connection, table_name=PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE)
+    backup_exists = _table_exists(connection=connection, table_name=PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE)
+    snapshot_exists = _table_exists(connection=connection, table_name="portfolio_plan_snapshot")
+
+    if backup_exists:
+        backup_rows = _table_row_count(connection=connection, table_name=PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE)
+        snapshot_rows = (
+            _table_row_count(connection=connection, table_name="portfolio_plan_snapshot") if snapshot_exists else 0
+        )
+        if backup_rows > 0 and snapshot_rows == 0:
+            if snapshot_exists:
+                connection.execute("DROP TABLE portfolio_plan_snapshot")
+            connection.execute(
+                f"ALTER TABLE {PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE} RENAME TO portfolio_plan_snapshot"
+            )
+            backup_exists = False
+        elif snapshot_exists and snapshot_rows > 0:
+            connection.execute(f"DROP TABLE {PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE}")
+            backup_exists = False
+
+    if stage_exists:
+        connection.execute(f"DROP TABLE {PORTFOLIO_PLAN_SNAPSHOT_STAGE_TABLE}")
+
+    if backup_exists:
+        connection.execute(f"DROP TABLE {PORTFOLIO_PLAN_SNAPSHOT_BACKUP_TABLE}")
+
+
 def _update_portfolio_plan_run_message_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
@@ -936,6 +1076,23 @@ def _update_portfolio_plan_run_message_sql(
 
 def _round_weight(value: float) -> float:
     return round(float(value), 4)
+
+
+def _table_exists(*, connection: duckdb.DuckDBPyConnection, table_name: str) -> bool:
+    return bool(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'main' AND table_name = ?
+            """,
+            [table_name],
+        ).fetchone()[0]
+    )
+
+
+def _table_row_count(*, connection: duckdb.DuckDBPyConnection, table_name: str) -> int:
+    return int(connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0])
 
 
 def _duckdb_string_literal(path: Path) -> str:

@@ -299,5 +299,5 @@ Stage-five implementation freeze addendum:
 ### `50` portfolio_plan live `0.50` cutover 性能修复与重验收
 
 - 结论文档：`docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`
-- 裁决：`已记录，portfolio_plan 待修`
-- 说明：Card 50 已完成按日分批 slow path、stderr progress 与尾段步骤日志修复；最新正式 rerun `portfolio-plan-0875345c4aa5` 已能跑到 `dates = 8531/8531`、`materialized_with_action` 与 committed replace 阶段，但最终提交仍未在本轮验证窗口内完成，因此 `portfolio_plan` 继续维持 `待修`。
+- 裁决：`已接受，portfolio_plan 放行`
+- 说明：Card 50 已完成 `snapshot_stage -> run_snapshot prewrite -> short cutover -> backup drop/index rebuild` 正式收口；最新正式 rerun `portfolio-plan-68ab0db998ad` 已 `completed`，`portfolio_plan_checkpoint.last_run_id` 已切新，正式 snapshot 已全部切到 `portfolio_gross_cap_weight = 0.50`，因此 `portfolio_plan = 放行`。

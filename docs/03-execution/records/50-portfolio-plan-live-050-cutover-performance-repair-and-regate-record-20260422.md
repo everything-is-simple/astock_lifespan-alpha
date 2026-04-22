@@ -6,37 +6,45 @@
 
 ## 1. 执行顺序
 
-1. 将 `portfolio_plan` slow path 从全表递归改为按 `planned_entry_trade_date` 分批物化。
-2. 保持 `run_portfolio_plan_build / portfolio_id / checkpoint / work_queue` 合同不变。
-3. 为 slow path 增加 progress message 与 stderr 日志。
-4. 补充三组单测：
-   - 同日顺序容量消耗
-   - `scheduled_exit_trade_date` 边界释放
-   - `0.50` 非旧形态回归
-5. 在正式 `H:\Lifespan-data` 上重跑 live `0.50` gate。
-6. 观察到主段 `dates=8531/8531` 可完成，随后继续跑到：
-   - `materialized_with_action`
-   - `old snapshot deleted`
-   - `snapshot inserted`
-   - `run_snapshot inserted`
-7. 在最终事务提交仍未完成的情况下，停止进程并将最新 run 收口为 `interrupted`。
-8. 回写 Card 50 证据、记录、结论与治理索引。
+1. 以当前本地未提交 `runner.py / test_portfolio_plan_runner.py` 为实施基线，保持 `portfolio_plan` 对外合同不变。
+2. 将 slow path 尾段固定为：
+   - `snapshot_stage_loading`
+   - `run_snapshot_prewrite_loaded`
+   - `cutover_started`
+   - `cutover_committed`
+   - `backup_dropped`
+3. 在 runner 启动前增加 `stage / backup / same-run run_snapshot` 残留清理与恢复。
+4. 补强 cutover 失败清理与遗留恢复单测，并确认以下前置验证全部通过：
+   - `pytest tests/unit/portfolio_plan -q`
+   - `pytest tests/unit/contracts/test_module_boundaries.py -q`
+   - `pytest tests/unit/docs/test_portfolio_plan_specs.py -q`
+   - `pytest tests/unit/docs/test_position_specs.py -q`
+   - `pytest -q`
+5. 在正式 `H:\Lifespan-data` 上执行 `python scripts/portfolio_plan/run_portfolio_plan_build.py`，stderr 与 stdout 分别落到 `H:\Lifespan-report\astock_lifespan_alpha\portfolio_plan\`。
+6. 观察到正式 run `portfolio-plan-68ab0db998ad` 完整走过：
+   - `dates=8531/8531`
+   - `snapshot_stage_loaded rows=5892934`
+   - `run_snapshot_prewrite_loaded`
+   - `cutover_committed`
+   - `backup_dropped`
+7. 查询正式库，确认 `checkpoint / snapshot / stage-cleanup / live index` 全部满足 Card 50 放行口径。
+8. 回写 Card 50 证据、记录、结论，以及治理面板和目录索引。
 
 ## 2. 关键结论
 
 - 本轮已经确认：
-  - 旧的“整表递归 + 无日志”瓶颈被替换并显著推进
-  - live 运行中 progress 已经可直接观察
-  - 当前剩余瓶颈收缩到正式 committed replace 的最终提交尾段
-- 本轮尚未确认：
+  - 旧的 live `DELETE + INSERT + INSERT + COMMIT` 尾段已被替换为 `snapshot swap + checkpoint` 短事务
   - `portfolio_plan_checkpoint` 已切到新的 `0.50` run
-  - 正式 `portfolio_plan_snapshot` 已从旧 `0.15` 结果切换
+  - 正式 `portfolio_plan_snapshot` 已从旧 `0.15` 结果切到新的 `0.50`
+  - `stage / backup` 残留未污染正式库，live 索引已恢复
+- 本轮未做：
+  - 不进入 `trade/system/pipeline`
+  - 不升级 `portfolio_plan_contract_version`
+  - 不把 `position` 直接升级为 `冻结`
 
 ## 3. 当前观察
 
 - `position` 继续维持 `放行`
-- 当前唯一活跃模块继续是 `portfolio_plan`
-- `trade / system` 仍不得提前启动 freeze gate
-- Card 50 之后的下一步固定为：
-  - 继续削减 committed replace 的最终提交尾段
-  - 重跑正式 `0.50` gate
+- `portfolio_plan` 已从 `待修` 切到 `放行`
+- 当前下一锤模块切换为 `trade`
+- `pipeline` 继续只承担 orchestration gate，不反推业务模块健康

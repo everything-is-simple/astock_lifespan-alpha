@@ -186,6 +186,9 @@ def test_portfolio_plan_050_regression_keeps_multiple_live_admissions(monkeypatc
 
     assert "slow_path=date_batched" in summary.message
     assert "timings={" in summary.message
+    assert "stage_snapshot_seconds=" in summary.message
+    assert "stage_run_snapshot_seconds=" in summary.message
+    assert "cutover_seconds=" in summary.message
     assert summary.materialization_counts == {
         "snapshot_rows": 5,
         "admitted_count": 3,
@@ -194,13 +197,42 @@ def test_portfolio_plan_050_regression_keeps_multiple_live_admissions(monkeypatc
     }
 
 
+def test_portfolio_plan_cutover_swap_leaves_no_stage_or_backup_tables(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_position_source_rows(
+        workspace / "data" / "astock_lifespan_alpha" / "position" / "position.duckdb",
+        rows=[
+            ("swap:1", "AAA", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.10, date(2026, 2, 2), None, None),
+            ("swap:2", "BBB", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.10, date(2026, 2, 2), None, None),
+        ],
+    )
+
+    run_portfolio_plan_build(portfolio_gross_cap_weight=0.15)
+
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"),
+        read_only=True,
+    ) as connection:
+        table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        snapshot_counts = connection.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT plan_snapshot_nk)
+            FROM portfolio_plan_snapshot
+            """
+        ).fetchone()
+
+    assert "portfolio_plan_snapshot_stage" not in table_names
+    assert "portfolio_plan_snapshot_backup" not in table_names
+    assert snapshot_counts == (2, 2)
+
+
 def test_portfolio_plan_runner_rolls_back_failed_rematerialization(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_market_base_day(workspace / "data" / "base" / "market_base.duckdb")
     _write_alpha_signal(workspace / "data" / "astock_lifespan_alpha" / "alpha" / "alpha_signal.duckdb")
 
     run_position_from_alpha_signal()
-    run_portfolio_plan_build(portfolio_gross_cap_weight=0.15)
+    first_summary = run_portfolio_plan_build(portfolio_gross_cap_weight=0.15)
     portfolio_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
     with duckdb.connect(str(portfolio_path), read_only=True) as connection:
         before_rows = connection.execute(
@@ -226,12 +258,97 @@ def test_portfolio_plan_runner_rolls_back_failed_rematerialization(monkeypatch, 
             ORDER BY candidate_nk
             """
         ).fetchall()
-        latest_run = connection.execute(
-            "SELECT status FROM portfolio_plan_run ORDER BY started_at DESC LIMIT 1"
+        latest_run_id, latest_run = connection.execute(
+            "SELECT run_id, status FROM portfolio_plan_run ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        interrupted_run_snapshot_count = connection.execute(
+            "SELECT COUNT(*) FROM portfolio_plan_run_snapshot WHERE run_id = ?",
+            [latest_run_id],
         ).fetchone()[0]
+        checkpoint_run_id = connection.execute(
+            "SELECT last_run_id FROM portfolio_plan_checkpoint WHERE portfolio_id = 'core'"
+        ).fetchone()[0]
+        table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
 
     assert after_rows == before_rows
     assert latest_run == "interrupted"
+    assert interrupted_run_snapshot_count == 0
+    assert checkpoint_run_id == first_summary.run_id
+    assert "portfolio_plan_snapshot_stage" not in table_names
+    assert "portfolio_plan_snapshot_backup" not in table_names
+
+
+def test_portfolio_plan_runner_cleans_leftover_stage_backup_and_same_run_snapshot(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_market_base_day(workspace / "data" / "base" / "market_base.duckdb")
+    _write_alpha_signal(workspace / "data" / "astock_lifespan_alpha" / "alpha" / "alpha_signal.duckdb")
+
+    run_position_from_alpha_signal()
+    first_summary = run_portfolio_plan_build(portfolio_gross_cap_weight=0.15)
+    portfolio_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
+    next_run_id = "portfolio-plan-fixedcleanup"
+
+    class _FixedUuid:
+        hex = "fixedcleanup1234567890abcdef"
+
+    with duckdb.connect(str(portfolio_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO portfolio_plan_run_snapshot (
+                run_id, plan_snapshot_nk, candidate_nk, plan_status, materialization_action
+            ) VALUES (?, 'stale:nk', 'stale:candidate', 'blocked', 'inserted')
+            """,
+            [next_run_id],
+        )
+        connection.execute(
+            """
+            CREATE TABLE portfolio_plan_snapshot_stage AS
+            SELECT *
+            FROM portfolio_plan_snapshot
+            WHERE 1 = 0
+            """
+        )
+        connection.execute("DROP INDEX IF EXISTS idx_portfolio_plan_snapshot_portfolio")
+        connection.execute("ALTER TABLE portfolio_plan_snapshot RENAME TO portfolio_plan_snapshot_backup")
+        connection.execute(
+            """
+            CREATE TABLE portfolio_plan_snapshot AS
+            SELECT *
+            FROM portfolio_plan_snapshot_backup
+            WHERE 1 = 0
+            """
+        )
+
+    monkeypatch.setattr(portfolio_plan_runner, "uuid4", lambda: _FixedUuid())
+    summary = run_portfolio_plan_build(portfolio_gross_cap_weight=0.15)
+
+    with duckdb.connect(str(portfolio_path), read_only=True) as connection:
+        table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        stale_row_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM portfolio_plan_run_snapshot
+            WHERE run_id = ? AND plan_snapshot_nk = 'stale:nk'
+            """,
+            [next_run_id],
+        ).fetchone()[0]
+        new_run_snapshot_count = connection.execute(
+            "SELECT COUNT(*) FROM portfolio_plan_run_snapshot WHERE run_id = ?",
+            [next_run_id],
+        ).fetchone()[0]
+        snapshot_row_count = connection.execute("SELECT COUNT(*) FROM portfolio_plan_snapshot").fetchone()[0]
+        checkpoint_run_id = connection.execute(
+            "SELECT last_run_id FROM portfolio_plan_checkpoint WHERE portfolio_id = 'core'"
+        ).fetchone()[0]
+
+    assert summary.status == "completed"
+    assert summary.checkpoint_summary.work_units_updated == 0
+    assert stale_row_count == 0
+    assert new_run_snapshot_count == snapshot_row_count
+    assert checkpoint_run_id != first_summary.run_id
+    assert checkpoint_run_id == next_run_id
+    assert "portfolio_plan_snapshot_stage" not in table_names
+    assert "portfolio_plan_snapshot_backup" not in table_names
 
 
 def test_repair_portfolio_plan_schema_is_idempotent(monkeypatch, tmp_path):

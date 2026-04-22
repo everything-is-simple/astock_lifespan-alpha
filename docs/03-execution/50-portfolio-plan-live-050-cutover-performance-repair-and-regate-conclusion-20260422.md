@@ -6,52 +6,52 @@
 
 ## 裁决
 
-`已记录，portfolio_plan 待修`
+`已接受，portfolio_plan 放行`
 
 ## 结论
 
-Card 50 已经完成 `portfolio_plan` live `0.50` cutover 的主要性能修复，并把前序黑盒显式收缩为最终 committed replace 尾段。
+Card 50 已经完成 `portfolio_plan` live `0.50` cutover 的正式性能修复与重验收，本轮不再停在 committed-replace 尾段。
 
 本轮正式确认：
 
 - `portfolio_plan` slow path 已不再使用整表递归累计 active gross
-- live stderr progress 已恢复，不再是空日志
-- 正式 rerun 已能跑到：
-  - `dates=8531/8531`
-  - `materialized_with_action`
-  - `old snapshot deleted`
-  - `snapshot inserted`
-  - `run_snapshot inserted`
-
-但本轮仍未满足放行条件：
-
-- 最新验证 run `portfolio-plan-0875345c4aa5` 未完成最终提交，已按 `interrupted` 收口
-- `portfolio_plan_checkpoint.last_run_id` 仍未切到新的 `0.50` run
-- 当前正式 `portfolio_plan_snapshot` 仍由旧 `0.15` run 主导
+- live stderr progress 已恢复，并完整覆盖 `stage -> cutover -> cleanup`
+- 最新正式 rerun `portfolio-plan-68ab0db998ad` 已完成：
+  - `snapshot_stage_loaded`
+  - `run_snapshot_prewrite_loaded`
+  - `cutover_committed`
+  - `backup_dropped`
+- `portfolio_plan_checkpoint.last_run_id` 已切到新的 `0.50` run
+- 正式 `portfolio_plan_snapshot` 已完成 live cutover，当前仅保留 `portfolio_gross_cap_weight = 0.50`
+- 库内不残留 `portfolio_plan_snapshot_stage / portfolio_plan_snapshot_backup`，live 索引也已恢复
 
 因此：
 
-- `portfolio_plan = 待修`
-- 本轮不进入 `trade`
-- 下一步固定为继续压缩 committed replace 尾段后，再重跑正式 `0.50` gate
+- `portfolio_plan = 放行`
+- `position` 继续维持 `放行`，本轮不升级为 `冻结`
+- 下一锤模块切换为 `trade`
 
 ## 正式 gate 结果
 
-- 最新验证 run：`portfolio-plan-0875345c4aa5`
-- `status = interrupted`
+- 最新验证 run：`portfolio-plan-68ab0db998ad`
+- `status = completed`
 - 最新 stderr 进度日志：
-  `H:\Lifespan-report\astock_lifespan_alpha\portfolio_plan\portfolio-plan-live-card50-20260422-160527.stderr.log`
+  `H:\Lifespan-report\astock_lifespan_alpha\portfolio_plan\portfolio-plan-live-card50-20260422-195527.stderr.log`
+- 最新 stdout summary：
+  `H:\Lifespan-report\astock_lifespan_alpha\portfolio_plan\portfolio-plan-live-card50-20260422-195527.stdout.json`
 - 当前正式 `portfolio_plan_checkpoint.last_run_id`：
-  `portfolio-plan-bd3a42d2fafe`
+  `portfolio-plan-68ab0db998ad`
+- 当前正式 `portfolio_plan_snapshot.portfolio_gross_cap_weight`：
+  - `0.50 = 5892934`
 - 当前正式 `plan_status`：
-  - `blocked = 5892932`
-  - `admitted = 1`
-  - `trimmed = 1`
+  - `blocked = 5883494`
+  - `admitted = 6638`
+  - `trimmed = 2802`
 
 ## 后续边界
 
-在 `portfolio_plan` 真正完成正式 `0.50` cutover 之前：
+在本轮 `portfolio_plan` 已放行之后：
 
-- 不进入 `trade` freeze card
-- 不把 `position` 从 `放行` 升级为 `冻结`
-- 不把 Card 50 误记为通过
+- 可以进入 `trade` freeze gate
+- `pipeline` 继续只承担 orchestration gate，不反推业务模块健康
+- `position` 是否升级为 `冻结` 另开正式批次裁决
