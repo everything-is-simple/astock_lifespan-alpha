@@ -277,3 +277,15 @@ Stage-five implementation freeze addendum:
   - `docs/03-execution/45-stage-sixteen-incremental-resume-spec-freeze-conclusion-20260421.md`
 - `46` 阶段十六正式增量与自动续跑工程收口
   - `docs/03-execution/46-stage-sixteen-incremental-resume-engineering-closeout-conclusion-20260421.md`
+
+### `47` 主线模块冻结战役治理面板启动
+
+- 结论文档：`docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
+- 裁决：`已接受，治理面板建立`
+- 说明：主线模块冻结战役已经切换到单模块治理面板推进；当前唯一活跃模块为 `position`，当前状态为 `放行`，下一锤模块为 `portfolio_plan`，`pipeline` 继续保持 orchestration-only，不承担业务健康证明。
+
+### `48` position 阶段十七 live freeze gate 与放行
+
+- 结论文档：`docs/03-execution/48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md`
+- 裁决：`已接受，position 放行`
+- 说明：`position` 已完成 stage-seventeen live cutover；最新正式 run `position-acda303305c7` 为 `completed`，`position_exit_plan / position_exit_leg` 已正式落表，`planned_entry_trade_date` 已大规模回填，因此 `position = 放行`，下一模块切换为 `portfolio_plan`。

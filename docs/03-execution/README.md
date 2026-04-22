@@ -180,3 +180,13 @@ Stage-five implementation defaults are frozen for engineering:
 - `46` 阶段十六正式增量与自动续跑工程收口
 - `stage-sixteen-incremental-resume` 已完成工程收口与真实 proof
 - `portfolio_plan / system / pipeline` 已补齐正式增量与 step 级自动续跑契约
+
+## 主线模块冻结战役补充
+
+- `47` 主线模块冻结战役治理面板启动
+- `48` position 阶段十七 live freeze gate 与放行
+- 当前唯一真相源为 `docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
+- 当前活跃模块仍是 `position`，但本轮 gate 结果已经更新为 `position = 放行`
+- `position` 尚未升级为 `冻结`；只有 `portfolio_plan` 后续 gate 未反向打破当前口径时才允许升级
+- 下一锤模块为 `portfolio_plan`
+- `pipeline` 继续只承担 orchestration gate，不倒推业务模块健康

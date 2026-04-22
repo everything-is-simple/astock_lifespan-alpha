@@ -199,6 +199,43 @@ def test_position_runner_filters_backward_adjust_method(monkeypatch, tmp_path):
     assert first_entry_date == date(2026, 1, 4)
 
 
+def test_position_runner_rebuilds_legacy_contract_drift_even_when_checkpoints_are_current(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_stock_daily_adjusted_with_adjust_method(workspace / "data" / "base" / "market_base.duckdb")
+    _write_alpha_signal(workspace / "data" / "astock_lifespan_alpha" / "alpha" / "alpha_signal.duckdb")
+
+    first_summary = run_position_from_alpha_signal()
+    assert first_summary.checkpoint_summary.work_units_updated == 1
+
+    position_path = workspace / "data" / "astock_lifespan_alpha" / "position" / "position.duckdb"
+    with duckdb.connect(str(position_path)) as connection:
+        connection.execute("DROP TABLE position_exit_plan")
+        connection.execute("DROP TABLE position_exit_leg")
+        connection.execute("UPDATE position_sizing_snapshot SET planned_entry_trade_date = NULL")
+
+    second_summary = run_position_from_alpha_signal()
+
+    assert second_summary.checkpoint_summary.work_units_updated == 1
+    assert second_summary.materialization_counts["exit_plan_rows"] == 3
+    assert second_summary.materialization_counts["exit_leg_rows"] == 3
+    assert second_summary.message == "position run completed with contract-drift full refresh."
+
+    with duckdb.connect(str(position_path), read_only=True) as connection:
+        planned_entry_rows = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM position_sizing_snapshot
+            WHERE planned_entry_trade_date IS NOT NULL
+            """
+        ).fetchone()[0]
+        exit_plan_rows = connection.execute("SELECT COUNT(*) FROM position_exit_plan").fetchone()[0]
+        exit_leg_rows = connection.execute("SELECT COUNT(*) FROM position_exit_leg").fetchone()[0]
+
+    assert planned_entry_rows == 4
+    assert exit_plan_rows == 3
+    assert exit_leg_rows == 3
+
+
 def _configure_workspace(*, monkeypatch, tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     monkeypatch.setenv("LIFESPAN_REPO_ROOT", str(workspace / "repo"))

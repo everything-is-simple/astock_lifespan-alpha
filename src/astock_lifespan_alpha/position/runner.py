@@ -48,6 +48,7 @@ def run_position_from_alpha_signal(*, settings: WorkspaceRoots | None = None) ->
     }
     symbols_updated = 0
     latest_signal_date: date | None = None
+    full_refresh_required = False
 
     with duckdb.connect(str(target_path)) as connection:
         source = _attach_position_source_view(connection=connection, workspace=workspace)
@@ -69,10 +70,14 @@ def run_position_from_alpha_signal(*, settings: WorkspaceRoots | None = None) ->
         if source.symbol_count == 0:
             message = "position schema initialized without source rows."
         else:
+            full_refresh_required = _position_contract_drift_requires_full_refresh(connection=connection)
             counts, symbols_updated, latest_signal_date = _materialize_position_sql(
                 connection=connection,
                 run_id=run_id,
+                full_refresh_required=full_refresh_required,
             )
+            if full_refresh_required:
+                message = "position run completed with contract-drift full refresh."
 
         connection.execute(
             """
@@ -266,6 +271,7 @@ def _materialize_position_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
+    full_refresh_required: bool,
 ) -> tuple[dict[str, int], int, date | None]:
     connection.execute(
         f"""
@@ -285,9 +291,12 @@ def _materialize_position_sql(
         FROM position_source_symbol_summary summary
         LEFT JOIN position_checkpoint checkpoint
             ON checkpoint.symbol = summary.symbol
-        WHERE checkpoint.last_signal_date IS NULL
+        WHERE ? = TRUE
+            OR checkpoint.last_signal_date IS NULL
             OR checkpoint.last_signal_date < summary.last_signal_date
         """
+        ,
+        [full_refresh_required],
     )
     latest_signal_date = connection.execute(
         "SELECT MAX(last_signal_date) FROM position_source_symbol_summary"
@@ -458,51 +467,95 @@ def _materialize_position_sql(
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE position_exit_trigger_candidates AS
-        WITH future_triggers AS (
+        WITH exit_trigger_rows AS (
             SELECT
-                entry.signal_nk AS candidate_nk,
-                entry.symbol,
-                entry.signal_date AS entry_signal_date,
-                trigger.signal_nk AS exit_trigger_signal_nk,
-                trigger.signal_date AS exit_signal_date,
+                symbol,
+                signal_date,
+                signal_nk AS exit_trigger_signal_nk,
                 CASE
-                    WHEN trigger.direction != 'up' THEN 'direction_not_long_exit'
-                    WHEN trigger.formal_signal_status != 'confirmed' THEN 'signal_not_confirmed_exit'
-                    WHEN trigger.wave_position_zone = 'weak_stagnation' THEN 'weak_wave_position_exit'
-                    WHEN trigger.no_new_span >= 2 THEN 'time_stop_no_new_span_exit'
+                    WHEN direction != 'up' THEN 'direction_not_long_exit'
+                    WHEN formal_signal_status != 'confirmed' THEN 'signal_not_confirmed_exit'
+                    WHEN wave_position_zone = 'weak_stagnation' THEN 'weak_wave_position_exit'
+                    WHEN no_new_span >= 2 THEN 'time_stop_no_new_span_exit'
                     ELSE NULL
-                END AS exit_reason_code,
+                END AS exit_reason_code
+            FROM position_evaluation_rows
+            WHERE
+                direction != 'up'
+                OR formal_signal_status != 'confirmed'
+                OR wave_position_zone = 'weak_stagnation'
+                OR no_new_span >= 2
+        ),
+        first_exit_trigger_per_day AS (
+            SELECT
+                symbol,
+                signal_date AS exit_signal_date,
+                exit_trigger_signal_nk,
+                exit_reason_code,
                 ROW_NUMBER() OVER (
-                    PARTITION BY entry.signal_nk
-                    ORDER BY trigger.signal_date, trigger.signal_nk
+                    PARTITION BY symbol, signal_date
+                    ORDER BY exit_trigger_signal_nk
+                ) AS signal_rank
+            FROM exit_trigger_rows
+        ),
+        next_exit_dates AS (
+            SELECT
+                signal_nk AS candidate_nk,
+                symbol,
+                signal_date AS entry_signal_date,
+                MIN(
+                    CASE
+                        WHEN direction != 'up'
+                            OR formal_signal_status != 'confirmed'
+                            OR wave_position_zone = 'weak_stagnation'
+                            OR no_new_span >= 2
+                        THEN signal_date
+                        ELSE NULL
+                    END
+                ) OVER (
+                    PARTITION BY symbol
+                    ORDER BY signal_date
+                    RANGE BETWEEN INTERVAL 1 DAY FOLLOWING AND UNBOUNDED FOLLOWING
                 ) AS trigger_rank
-            FROM position_evaluation_rows AS entry
-            INNER JOIN position_evaluation_rows AS trigger
-                ON trigger.symbol = entry.symbol
-                AND trigger.signal_date > entry.signal_date
-            WHERE entry.final_allowed_position_weight > 0
-                AND (
-                    trigger.direction != 'up'
-                    OR trigger.formal_signal_status != 'confirmed'
-                    OR trigger.wave_position_zone = 'weak_stagnation'
-                    OR trigger.no_new_span >= 2
-                )
+            FROM position_evaluation_rows
         )
         SELECT
-            trigger.*,
+            next_exit_dates.candidate_nk,
+            next_exit_dates.symbol,
+            next_exit_dates.entry_signal_date,
+            trigger.exit_trigger_signal_nk,
+            trigger.exit_signal_date,
+            trigger.exit_reason_code,
             exit_reference.trade_date AS planned_exit_trade_date,
             exit_reference.open_price AS planned_exit_reference_price
         FROM (
             SELECT *
-            FROM future_triggers
-            WHERE trigger_rank = 1
+            FROM next_exit_dates
+            WHERE trigger_rank IS NOT NULL
+        ) AS next_exit_dates
+        INNER JOIN (
+            SELECT
+                symbol,
+                exit_signal_date,
+                exit_trigger_signal_nk,
+                exit_reason_code
+            FROM first_exit_trigger_per_day
+            WHERE signal_rank = 1
         ) AS trigger
+            ON trigger.symbol = next_exit_dates.symbol
+            AND trigger.exit_signal_date = next_exit_dates.trigger_rank
         ASOF LEFT JOIN (
             SELECT symbol, trade_date, CAST(close AS DOUBLE) AS open_price
             FROM position_market_reference
         ) AS exit_reference
-            ON exit_reference.symbol = trigger.symbol
+            ON exit_reference.symbol = next_exit_dates.symbol
             AND trigger.exit_signal_date < exit_reference.trade_date
+        WHERE EXISTS (
+            SELECT 1
+            FROM position_evaluation_rows AS entry
+            WHERE entry.signal_nk = next_exit_dates.candidate_nk
+                AND entry.final_allowed_position_weight > 0
+        )
         """
     )
     connection.execute(
@@ -605,3 +658,40 @@ def _pick_required_column(column_names: set[str], candidates: tuple[str, ...]) -
 
 def _duckdb_string_literal(path: Path) -> str:
     return "'" + str(path).replace("'", "''") + "'"
+
+
+def _position_contract_drift_requires_full_refresh(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+) -> bool:
+    available_tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+    required_tables = {
+        "position_candidate_audit",
+        "position_capacity_snapshot",
+        "position_sizing_snapshot",
+        "position_exit_plan",
+        "position_exit_leg",
+    }
+    if not required_tables.issubset(available_tables):
+        return True
+    sizing_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info('position_sizing_snapshot')").fetchall()
+    }
+    if "planned_entry_trade_date" not in sizing_columns:
+        return True
+    candidate_rows = int(connection.execute("SELECT COUNT(*) FROM position_candidate_audit").fetchone()[0])
+    if candidate_rows == 0:
+        return False
+    planned_entry_rows = int(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM position_sizing_snapshot
+            WHERE planned_entry_trade_date IS NOT NULL
+            """
+        ).fetchone()[0]
+    )
+    exit_plan_rows = int(connection.execute("SELECT COUNT(*) FROM position_exit_plan").fetchone()[0])
+    exit_leg_rows = int(connection.execute("SELECT COUNT(*) FROM position_exit_leg").fetchone()[0])
+    return planned_entry_rows == 0 or exit_plan_rows == 0 or exit_leg_rows == 0

@@ -190,3 +190,18 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 阶段十三只做 segmented build completion，不修改 MALF 语义
 
 当前正式状态为：真实 `100 / 500 / 1000 symbol` 分段证明与 full-universe completion 仍待执行，阶段九 replay 待阶段十三完成后重新发起。
+
+## 阶段十七与 position 放行更新
+
+阶段十七 `stage-seventeen-rolling-backtest-minimal-v1` 已开始进入主线单模块冻结战役：
+
+- 主线治理面板：`docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
+- `position` live freeze gate 结论：`docs/03-execution/48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md`
+- 当前唯一活跃模块：`position`
+- 当前 gate 结论：`position = 放行`
+- 最新正式 run：`position-acda303305c7`
+- 正式库已落出 `position_exit_plan = 2564635`
+- 正式库已落出 `position_exit_leg = 2564635`
+- `planned_entry_trade_date IS NOT NULL = 5889479`
+- 下一锤模块：`portfolio_plan`
+- 当前不宣告 `position` 冻结，需等待后续 `portfolio_plan` gate 不反向打破

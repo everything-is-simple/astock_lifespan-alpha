@@ -50,3 +50,50 @@ def test_position_and_portfolio_plan_specs_define_minimal_stage_four_ledgers():
         "`run_portfolio_plan_build`",
     ]:
         assert term in portfolio_content
+
+
+def test_mainline_freeze_campaign_board_and_position_release_are_registered():
+    repo_root = Path(__file__).resolve().parents[3]
+    catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
+        encoding="utf-8"
+    )
+    execution_index = (repo_root / "docs" / "03-execution" / "README.md").read_text(encoding="utf-8")
+    docs_index = (repo_root / "docs" / "README.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+
+    combined = f"{catalog}\n{execution_index}\n{docs_index}\n{readme}"
+    required_terms = [
+        "`47` 主线模块冻结战役治理面板启动",
+        "`48` position 阶段十七 live freeze gate 与放行",
+        "`docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`",
+        "`docs/03-execution/48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md`",
+        "`position = 放行`",
+        "`portfolio_plan`",
+    ]
+
+    for term in required_terms:
+        assert term in combined
+
+
+def test_position_release_conclusion_captures_live_stage_seventeen_cutover():
+    repo_root = Path(__file__).resolve().parents[3]
+    conclusion = (
+        repo_root
+        / "docs"
+        / "03-execution"
+        / "48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md"
+    ).read_text(encoding="utf-8")
+
+    required_terms = [
+        "`已接受，position 放行`",
+        "`position-acda303305c7`",
+        "`position_exit_plan`",
+        "`position_exit_leg`",
+        "`planned_entry_trade_date`",
+        "`portfolio_plan`",
+        "`放行`",
+        "`冻结`",
+    ]
+
+    for term in required_terms:
+        assert term in conclusion
