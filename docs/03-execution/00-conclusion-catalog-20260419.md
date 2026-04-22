@@ -289,3 +289,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md`
 - 裁决：`已接受，position 放行`
 - 说明：`position` 已完成 stage-seventeen live cutover；最新正式 run `position-acda303305c7` 为 `completed`，`position_exit_plan / position_exit_leg` 已正式落表，`planned_entry_trade_date` 已大规模回填，因此 `position = 放行`，下一模块切换为 `portfolio_plan`。
+
+### `49` portfolio_plan 阶段十七 live freeze gate
+
+- 结论文档：`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`
+- 裁决：`已记录，portfolio_plan 待修`
+- 说明：`portfolio_plan` 已进入 stage-seventeen live freeze gate；当前代码与单测已接近新口径，但正式库最新 run 仍停在 `portfolio_gross_cap_weight = 0.15`，因此本轮先登记 `portfolio_plan = 待修`，等待真实 replay 与正式重跑通过后再判 `放行`。

@@ -14,9 +14,9 @@
 
 本轮治理面板确认：
 
-- 当前活跃模块是 `position`
+- 当前活跃模块是 `portfolio_plan`
 - `position` 当前状态是 `放行`
-- 下一锤模块是 `portfolio_plan`
+- `portfolio_plan` 当前状态是 `待修`
 - `pipeline` 仍只承担 orchestration gate，不承担业务模块健康证明
 
 ## 当前面板
@@ -24,7 +24,7 @@
 | 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻断原因/备注 |
 | --- | --- | --- | --- | --- |
 | `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `portfolio_plan` gate | 已完成 live cutover，本轮不写 `冻结` |
-| `portfolio_plan` | `待测` | `stage-sixteen incremental resume` | 开 `portfolio_plan` freeze card | 需验证 live active-cap |
+| `portfolio_plan` | `待修` | `2026-04-22 portfolio_plan live preflight` | 做 stage-seventeen live gate 与正式重跑 | 最新正式 run 仍停在 `0.15` 旧口径 |
 | `trade` | `待测` | `stage-five engineering closeout` | 等待 `portfolio_plan` 放行 | 等待上游 |
 | `system` | `待测` | `stage-six engineering closeout` | 等待 `trade` 放行 | 等待上游 |
 | `pipeline` | `待测` | `stage-sixteen incremental resume` | 等待业务模块放行后验收 | orchestration-only |

@@ -185,8 +185,11 @@ Stage-five implementation defaults are frozen for engineering:
 
 - `47` 主线模块冻结战役治理面板启动
 - `48` position 阶段十七 live freeze gate 与放行
+- `49` portfolio_plan 阶段十七 live freeze gate
 - 当前唯一真相源为 `docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
-- 当前活跃模块仍是 `position`，但本轮 gate 结果已经更新为 `position = 放行`
+- 当前活跃模块已切换为 `portfolio_plan`
+- `position = 放行`
+- `portfolio_plan = 待修`
 - `position` 尚未升级为 `冻结`；只有 `portfolio_plan` 后续 gate 未反向打破当前口径时才允许升级
-- 下一锤模块为 `portfolio_plan`
+- 下一锤模块仍保持 `portfolio_plan`
 - `pipeline` 继续只承担 orchestration gate，不倒推业务模块健康

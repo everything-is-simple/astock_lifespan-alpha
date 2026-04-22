@@ -205,3 +205,12 @@ Stage-five implementation defaults are now frozen before engineering work:
 - `planned_entry_trade_date IS NOT NULL = 5889479`
 - 下一锤模块：`portfolio_plan`
 - 当前不宣告 `position` 冻结，需等待后续 `portfolio_plan` gate 不反向打破
+
+## 阶段十七与 portfolio_plan freeze gate 更新
+
+- `portfolio_plan` freeze gate 结论：`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`
+- 当前唯一活跃模块：`portfolio_plan`
+- 当前 gate 结论：`portfolio_plan = 待修`
+- 正式库最新 run 仍为 `portfolio_gross_cap_weight = 0.15`
+- 当前 `plan_status` 聚合仍是 `blocked = 5892932`、`admitted = 1`、`trimmed = 1`
+- 下一步固定为：bounded real-data replay + 正式 live 重跑

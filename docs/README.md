@@ -268,7 +268,8 @@ Stage-five engineering defaults are frozen:
 
 - 治理面板结论：`docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
 - `position` 放行结论：`docs/03-execution/48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md`
+- `portfolio_plan` freeze gate 结论：`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`
 - 当前主线冻结战役按 `position -> portfolio_plan -> trade -> system -> pipeline -> alpha -> malf -> data` 顺序推进
-- 当前状态为 `position = 放行`
-- 下一锤模块为 `portfolio_plan`
+- 当前状态为 `position = 放行`，`portfolio_plan = 待修`
+- 当前活跃模块为 `portfolio_plan`
 - 当前批次不宣告 `position` 冻结，只登记 live freeze gate 已通过
