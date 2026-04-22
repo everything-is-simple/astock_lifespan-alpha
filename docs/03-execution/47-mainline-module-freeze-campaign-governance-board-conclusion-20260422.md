@@ -24,7 +24,7 @@
 | 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻断原因/备注 |
 | --- | --- | --- | --- | --- |
 | `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `portfolio_plan` gate | 已完成 live cutover，本轮不写 `冻结` |
-| `portfolio_plan` | `待修` | `2026-04-22 portfolio_plan live preflight` | 做 stage-seventeen live gate 与正式重跑 | 最新正式 run 仍停在 `0.15` 旧口径 |
+| `portfolio_plan` | `待修` | `2026-04-22 portfolio_plan live gate attempt` | 修复 live cutover 后重跑正式 `0.50` gate | bounded replay 与 schema repair 已过，但最新 `0.50` run 已 `interrupted` |
 | `trade` | `待测` | `stage-five engineering closeout` | 等待 `portfolio_plan` 放行 | 等待上游 |
 | `system` | `待测` | `stage-six engineering closeout` | 等待 `trade` 放行 | 等待上游 |
 | `pipeline` | `待测` | `stage-sixteen incremental resume` | 等待业务模块放行后验收 | orchestration-only |

@@ -190,6 +190,7 @@ Stage-five implementation defaults are frozen for engineering:
 - 当前活跃模块已切换为 `portfolio_plan`
 - `position = 放行`
 - `portfolio_plan = 待修`
+- `portfolio_plan` 的 bounded replay 与 schema repair 已通过，但 live `0.50` rerun 已 `interrupted`
 - `position` 尚未升级为 `冻结`；只有 `portfolio_plan` 后续 gate 未反向打破当前口径时才允许升级
 - 下一锤模块仍保持 `portfolio_plan`
 - `pipeline` 继续只承担 orchestration gate，不倒推业务模块健康

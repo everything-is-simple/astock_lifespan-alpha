@@ -294,4 +294,4 @@ Stage-five implementation freeze addendum:
 
 - 结论文档：`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`
 - 裁决：`已记录，portfolio_plan 待修`
-- 说明：`portfolio_plan` 已进入 stage-seventeen live freeze gate；当前代码与单测已接近新口径，但正式库最新 run 仍停在 `portfolio_gross_cap_weight = 0.15`，因此本轮先登记 `portfolio_plan = 待修`，等待真实 replay 与正式重跑通过后再判 `放行`。
+- 说明：`portfolio_plan` 已进入 stage-seventeen live freeze gate；bounded replay 已证明 `0.50` active-cap 语义成立，schema repair 也已完成，但 live `0.50` rerun `portfolio-plan-21b6ab8747f7` 因 stall 被标记为 `interrupted`，当前正式结果仍由旧 `0.15` run 主导，因此继续登记 `portfolio_plan = 待修`。

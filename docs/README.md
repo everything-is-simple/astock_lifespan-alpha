@@ -272,4 +272,5 @@ Stage-five engineering defaults are frozen:
 - 当前主线冻结战役按 `position -> portfolio_plan -> trade -> system -> pipeline -> alpha -> malf -> data` 顺序推进
 - 当前状态为 `position = 放行`，`portfolio_plan = 待修`
 - 当前活跃模块为 `portfolio_plan`
+- `portfolio_plan` 当前 blocker 已更新为 live `0.50` cutover stall，而不是语义未定义
 - 当前批次不宣告 `position` 冻结，只登记 live freeze gate 已通过

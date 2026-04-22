@@ -12,10 +12,12 @@
 4. 将 `position` 的 live cutover 结果登记为 `放行`。
 5. 将 `portfolio_plan` 提升为当前活跃模块。
 6. 将 `portfolio_plan` 的正式库旧口径 preflight 登记为 `待修`。
+7. 补充登记 `portfolio_plan` bounded replay 已通过、schema repair 已完成、live `0.50` gate 被 `interrupted`。
 
 ## 2. 关键裁决
 
 - 当前这张治理面板是本轮主线冻结战役的唯一真相源。
 - `position` 本轮只写 `放行`，不提前写 `冻结`。
 - `portfolio_plan` 进入当前唯一活跃修复模块。
+- `portfolio_plan` 当前 blocker 已从“旧口径 preflight”升级为“live `0.50` cutover stall”。
 - `trade / system / pipeline / alpha / malf / data` 继续维持非活跃状态，避免并行扩散。
