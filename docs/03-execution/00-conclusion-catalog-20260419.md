@@ -295,3 +295,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`
 - 裁决：`已记录，portfolio_plan 待修`
 - 说明：`portfolio_plan` 已进入 stage-seventeen live freeze gate；bounded replay 已证明 `0.50` active-cap 语义成立，schema repair 也已完成，但 live `0.50` rerun `portfolio-plan-21b6ab8747f7` 因 stall 被标记为 `interrupted`，当前正式结果仍由旧 `0.15` run 主导，因此继续登记 `portfolio_plan = 待修`。
+
+### `50` portfolio_plan live `0.50` cutover 性能修复与重验收
+
+- 结论文档：`docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`
+- 裁决：`已记录，portfolio_plan 待修`
+- 说明：Card 50 已完成按日分批 slow path、stderr progress 与尾段步骤日志修复；最新正式 rerun `portfolio-plan-0875345c4aa5` 已能跑到 `dates = 8531/8531`、`materialized_with_action` 与 committed replace 阶段，但最终提交仍未在本轮验证窗口内完成，因此 `portfolio_plan` 继续维持 `待修`。

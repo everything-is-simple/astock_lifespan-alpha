@@ -216,3 +216,12 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 最新 `0.50` run `portfolio-plan-21b6ab8747f7` 已因 stall 被标记为 `interrupted`
 - 当前正式结果仍由旧 `0.15` run 主导，`plan_status` 聚合仍是 `blocked = 5892932`、`admitted = 1`、`trimmed = 1`
 - 下一步固定为：修复 live cutover 路径后重跑正式 `0.50` gate
+
+## 阶段十七与 portfolio_plan Card 50 更新
+
+- `portfolio_plan` Card 50 结论：`docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`
+- Card 50 已完成按日分批 slow path、stderr progress 与尾段步骤日志
+- 正式 rerun 已能跑到 `dates = 8531/8531`、`materialized_with_action` 与 committed replace 三步日志
+- 最新验证 run：`portfolio-plan-0875345c4aa5`
+- 当前仍未完成最终提交，故 `portfolio_plan = 待修`
+- 下一步固定为：继续压缩 committed replace 尾段后再重跑正式 `0.50` gate

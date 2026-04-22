@@ -186,11 +186,13 @@ Stage-five implementation defaults are frozen for engineering:
 - `47` 主线模块冻结战役治理面板启动
 - `48` position 阶段十七 live freeze gate 与放行
 - `49` portfolio_plan 阶段十七 live freeze gate
+- `50` portfolio_plan live `0.50` cutover 性能修复与重验收
 - 当前唯一真相源为 `docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
 - 当前活跃模块已切换为 `portfolio_plan`
 - `position = 放行`
 - `portfolio_plan = 待修`
 - `portfolio_plan` 的 bounded replay 与 schema repair 已通过，但 live `0.50` rerun 已 `interrupted`
+- Card 50 已补齐按日分批 slow path、stderr progress 与尾段步骤日志，但最新正式 `0.50` rerun 仍未完成最终提交
 - `position` 尚未升级为 `冻结`；只有 `portfolio_plan` 后续 gate 未反向打破当前口径时才允许升级
 - 下一锤模块仍保持 `portfolio_plan`
 - `pipeline` 继续只承担 orchestration gate，不倒推业务模块健康

@@ -32,7 +32,7 @@ def test_portfolio_plan_specs_capture_stage_four_and_stage_seventeen_contracts()
         assert term in stage_seventeen
 
 
-def test_portfolio_plan_freeze_gate_is_registered_and_marked_pending_fix():
+def test_portfolio_plan_freeze_gate_and_card50_regate_are_registered_and_marked_pending_fix():
     repo_root = Path(__file__).resolve().parents[3]
     catalog = (repo_root / "docs" / "03-execution" / "00-conclusion-catalog-20260419.md").read_text(
         encoding="utf-8"
@@ -50,14 +50,17 @@ def test_portfolio_plan_freeze_gate_is_registered_and_marked_pending_fix():
         repo_root
         / "docs"
         / "03-execution"
-        / "49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md"
+        / "50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md"
     ).read_text(encoding="utf-8")
 
     combined = f"{catalog}\n{execution_index}\n{docs_index}\n{readme}\n{board}\n{conclusion}"
     required_terms = [
         "`49` portfolio_plan 阶段十七 live freeze gate",
+        "`50` portfolio_plan live `0.50` cutover 性能修复与重验收",
         "`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`",
+        "`docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`",
         "`portfolio_plan = 待修`",
+        "`portfolio-plan-0875345c4aa5`",
         "`position`",
         "`放行`",
         "`portfolio_plan`",

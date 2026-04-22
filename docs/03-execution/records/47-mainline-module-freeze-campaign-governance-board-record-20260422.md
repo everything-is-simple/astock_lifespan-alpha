@@ -20,4 +20,5 @@
 - `position` 本轮只写 `放行`，不提前写 `冻结`。
 - `portfolio_plan` 进入当前唯一活跃修复模块。
 - `portfolio_plan` 当前 blocker 已从“旧口径 preflight”升级为“live `0.50` cutover stall”。
+- Card 50 之后，`portfolio_plan` 当前 blocker 继续收缩为“committed replace 最终提交尾段”。
 - `trade / system / pipeline / alpha / malf / data` 继续维持非活跃状态，避免并行扩散。

@@ -102,6 +102,98 @@ def test_portfolio_plan_releases_capacity_after_scheduled_exit(monkeypatch, tmp_
     ]
 
 
+def test_portfolio_plan_same_day_rows_consume_capacity_in_order(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_position_source_rows(
+        workspace / "data" / "astock_lifespan_alpha" / "position" / "position.duckdb",
+        rows=[
+            ("same:1", "AAA", date(2026, 1, 2), date(2026, 1, 2), "admitted", None, "open", 0.06, date(2026, 1, 3), None, None),
+            ("same:2", "AAA", date(2026, 1, 2), date(2026, 1, 2), "admitted", None, "open", 0.06, date(2026, 1, 3), None, None),
+            ("same:3", "AAA", date(2026, 1, 2), date(2026, 1, 2), "admitted", None, "open", 0.04, date(2026, 1, 3), None, None),
+        ],
+    )
+
+    summary = run_portfolio_plan_build(portfolio_gross_cap_weight=0.10)
+
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"),
+        read_only=True,
+    ) as connection:
+        rows = connection.execute(
+            """
+            SELECT candidate_nk, plan_status, admitted_weight, current_portfolio_gross_weight,
+                   remaining_portfolio_capacity_weight
+            FROM portfolio_plan_snapshot
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+
+    assert "slow_path=date_batched" in summary.message
+    assert rows == [
+        ("same:1", "admitted", 0.06, 0.0, 0.04),
+        ("same:2", "trimmed", 0.04, 0.06, 0.0),
+        ("same:3", "blocked", 0.0, 0.1, 0.0),
+    ]
+
+
+def test_portfolio_plan_releases_capacity_on_scheduled_exit_boundary(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_position_source_rows(
+        workspace / "data" / "astock_lifespan_alpha" / "position" / "position.duckdb",
+        rows=[
+            ("carry:1", "AAA", date(2026, 1, 1), date(2026, 1, 1), "admitted", None, "open", 0.06, date(2026, 1, 2), date(2026, 1, 4), "time_stop"),
+            ("carry:2", "AAA", date(2026, 1, 2), date(2026, 1, 2), "admitted", None, "open", 0.06, date(2026, 1, 3), None, None),
+            ("carry:3", "AAA", date(2026, 1, 3), date(2026, 1, 3), "admitted", None, "open", 0.06, date(2026, 1, 4), None, None),
+        ],
+    )
+
+    run_portfolio_plan_build(portfolio_gross_cap_weight=0.10)
+
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"),
+        read_only=True,
+    ) as connection:
+        rows = connection.execute(
+            """
+            SELECT candidate_nk, plan_status, admitted_weight, blocking_reason_code,
+                   current_portfolio_gross_weight, remaining_portfolio_capacity_weight
+            FROM portfolio_plan_snapshot
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+
+    assert rows == [
+        ("carry:1", "admitted", 0.06, None, 0.0, 0.04),
+        ("carry:2", "trimmed", 0.04, "portfolio_capacity_trimmed", 0.06, 0.0),
+        ("carry:3", "admitted", 0.06, None, 0.04, 0.0),
+    ]
+
+
+def test_portfolio_plan_050_regression_keeps_multiple_live_admissions(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_position_source_rows(
+        workspace / "data" / "astock_lifespan_alpha" / "position" / "position.duckdb",
+        rows=[
+            ("cap:1", "AAA", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.15, date(2026, 2, 2), None, None),
+            ("cap:2", "BBB", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.15, date(2026, 2, 2), None, None),
+            ("cap:3", "CCC", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.15, date(2026, 2, 2), None, None),
+            ("cap:4", "DDD", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.15, date(2026, 2, 2), None, None),
+            ("cap:5", "EEE", date(2026, 2, 1), date(2026, 2, 1), "admitted", None, "open", 0.15, date(2026, 2, 2), None, None),
+        ],
+    )
+
+    summary = run_portfolio_plan_build(portfolio_gross_cap_weight=0.50)
+
+    assert "slow_path=date_batched" in summary.message
+    assert "timings={" in summary.message
+    assert summary.materialization_counts == {
+        "snapshot_rows": 5,
+        "admitted_count": 3,
+        "blocked_count": 1,
+        "trimmed_count": 1,
+    }
+
+
 def test_portfolio_plan_runner_rolls_back_failed_rematerialization(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_market_base_day(workspace / "data" / "base" / "market_base.duckdb")
@@ -207,6 +299,111 @@ def _write_market_base_day(database_path: Path) -> None:
                 (symbol, datetime.fromisoformat(bar_dt), close_price, close_price, close_price, close_price)
                 for symbol, bar_dt, close_price in rows
             ],
+        )
+
+
+def _write_position_source_rows(database_path: Path, rows: list[tuple]) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DROP TABLE IF EXISTS position_candidate_audit")
+        connection.execute("DROP TABLE IF EXISTS position_capacity_snapshot")
+        connection.execute("DROP TABLE IF EXISTS position_sizing_snapshot")
+        connection.execute("DROP TABLE IF EXISTS position_exit_plan")
+        connection.execute(
+            """
+            CREATE TABLE position_candidate_audit (
+                candidate_nk TEXT,
+                symbol TEXT,
+                reference_trade_date DATE,
+                signal_date DATE,
+                candidate_status TEXT,
+                blocked_reason_code TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE position_capacity_snapshot (
+                candidate_nk TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE position_sizing_snapshot (
+                candidate_nk TEXT,
+                position_action_decision TEXT,
+                final_allowed_position_weight DOUBLE,
+                planned_entry_trade_date DATE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE position_exit_plan (
+                candidate_nk TEXT,
+                planned_exit_trade_date DATE,
+                exit_reason_code TEXT
+            )
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO position_candidate_audit VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [(candidate_nk, symbol, reference_trade_date, signal_date, candidate_status, blocked_reason_code) for (
+                candidate_nk,
+                symbol,
+                reference_trade_date,
+                signal_date,
+                candidate_status,
+                blocked_reason_code,
+                _position_action_decision,
+                _final_allowed_position_weight,
+                _planned_entry_trade_date,
+                _planned_exit_trade_date,
+                _exit_reason_code,
+            ) in rows],
+        )
+        connection.executemany(
+            "INSERT INTO position_capacity_snapshot VALUES (?)",
+            [(candidate_nk,) for (candidate_nk, *_rest) in rows],
+        )
+        connection.executemany(
+            """
+            INSERT INTO position_sizing_snapshot VALUES (?, ?, ?, ?)
+            """,
+            [(candidate_nk, position_action_decision, final_allowed_position_weight, planned_entry_trade_date) for (
+                candidate_nk,
+                _symbol,
+                _reference_trade_date,
+                _signal_date,
+                _candidate_status,
+                _blocked_reason_code,
+                position_action_decision,
+                final_allowed_position_weight,
+                planned_entry_trade_date,
+                _planned_exit_trade_date,
+                _exit_reason_code,
+            ) in rows],
+        )
+        connection.executemany(
+            """
+            INSERT INTO position_exit_plan VALUES (?, ?, ?)
+            """,
+            [(candidate_nk, planned_exit_trade_date, exit_reason_code) for (
+                candidate_nk,
+                _symbol,
+                _reference_trade_date,
+                _signal_date,
+                _candidate_status,
+                _blocked_reason_code,
+                _position_action_decision,
+                _final_allowed_position_weight,
+                _planned_entry_trade_date,
+                planned_exit_trade_date,
+                exit_reason_code,
+            ) in rows],
         )
 
 

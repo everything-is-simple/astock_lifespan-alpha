@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from heapq import heappop, heappush
 from pathlib import Path
+import sys
+from time import perf_counter
 from uuid import uuid4
 
 import duckdb
@@ -19,6 +22,7 @@ from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_pla
 
 
 PORTFOLIO_PLAN_CONTRACT_VERSION = "stage4_portfolio_plan_v2"
+PORTFOLIO_PLAN_PROGRESS_UPDATE_INTERVAL = 100
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,7 @@ def run_portfolio_plan_build(
                         portfolio_id=portfolio_id,
                     )
                 else:
-                    counts, work_units_updated, latest_reference_trade_date = _materialize_portfolio_plan_sql(
+                    counts, work_units_updated, latest_reference_trade_date, message = _materialize_portfolio_plan_sql(
                         connection=connection,
                         run_id=run_id,
                         portfolio_id=portfolio_id,
@@ -331,7 +335,9 @@ def _materialize_portfolio_plan_sql(
     run_id: str,
     portfolio_id: str,
     portfolio_gross_cap_weight: float,
-) -> tuple[dict[str, int], int, date | None]:
+) -> tuple[dict[str, int], int, date | None, str]:
+    phase_seconds: dict[str, float] = {}
+    phase_started = perf_counter()
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE portfolio_plan_existing_snapshot AS
@@ -341,14 +347,29 @@ def _materialize_portfolio_plan_sql(
         """,
         [portfolio_id],
     )
+    if int(connection.execute("SELECT COUNT(*) FROM portfolio_plan_existing_snapshot").fetchone()[0]) > 0:
+        connection.execute(
+            """
+            CREATE INDEX portfolio_plan_existing_snapshot_nk_idx
+            ON portfolio_plan_existing_snapshot (plan_snapshot_nk)
+            """
+        )
+    phase_seconds["existing_snapshot_seconds"] = perf_counter() - phase_started
+
+    phase_started = perf_counter()
     connection.execute(
-        f"""
-        CREATE OR REPLACE TEMP TABLE portfolio_plan_materialized AS
-        WITH RECURSIVE ordered_rows AS (
+        """
+        CREATE OR REPLACE TEMP TABLE portfolio_plan_ordered_source AS
+        SELECT *
+        FROM (
             SELECT
                 ROW_NUMBER() OVER (
-                    ORDER BY planned_entry_trade_date, reference_trade_date, signal_date, candidate_nk
-                ) AS row_number,
+                    ORDER BY planned_entry_trade_date NULLS LAST, reference_trade_date, signal_date, candidate_nk
+                ) AS global_row_number,
+                ROW_NUMBER() OVER (
+                    PARTITION BY planned_entry_trade_date
+                    ORDER BY reference_trade_date, signal_date, candidate_nk
+                ) AS entry_row_number,
                 candidate_nk,
                 symbol,
                 reference_trade_date,
@@ -361,154 +382,340 @@ def _materialize_portfolio_plan_sql(
                 position_action_decision,
                 ROUND(LEAST(final_allowed_position_weight, 0.15), 4) AS requested_weight
             FROM portfolio_position_source_rows
+        )
+        ORDER BY global_row_number
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE portfolio_plan_entry_date_ranges AS
+        SELECT
+            planned_entry_trade_date,
+            MIN(global_row_number) AS start_row_number,
+            MAX(global_row_number) AS end_row_number
+        FROM portfolio_plan_ordered_source
+        WHERE planned_entry_trade_date IS NOT NULL
+        GROUP BY planned_entry_trade_date
+        ORDER BY planned_entry_trade_date
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE portfolio_plan_materialized AS
+        SELECT
+            CAST(NULL AS VARCHAR) AS plan_snapshot_nk,
+            CAST(NULL AS VARCHAR) AS candidate_nk,
+            CAST(NULL AS VARCHAR) AS portfolio_id,
+            CAST(NULL AS VARCHAR) AS symbol,
+            CAST(NULL AS DATE) AS reference_trade_date,
+            CAST(NULL AS DATE) AS planned_entry_trade_date,
+            CAST(NULL AS DATE) AS scheduled_exit_trade_date,
+            CAST(NULL AS VARCHAR) AS position_action_decision,
+            CAST(NULL AS DOUBLE) AS requested_weight,
+            CAST(NULL AS DOUBLE) AS admitted_weight,
+            CAST(NULL AS DOUBLE) AS trimmed_weight,
+            CAST(NULL AS VARCHAR) AS plan_status,
+            CAST(NULL AS VARCHAR) AS blocking_reason_code,
+            CAST(NULL AS VARCHAR) AS planned_exit_reason_code,
+            CAST(NULL AS DOUBLE) AS portfolio_gross_cap_weight,
+            CAST(NULL AS DOUBLE) AS current_portfolio_gross_weight,
+            CAST(NULL AS DOUBLE) AS remaining_portfolio_capacity_weight,
+            CAST(NULL AS DOUBLE) AS portfolio_gross_used_weight,
+            CAST(NULL AS DOUBLE) AS portfolio_gross_remaining_weight,
+            CAST(NULL AS VARCHAR) AS portfolio_plan_contract_version
+        WHERE 1 = 0
+        """
+    )
+    entry_dates = [
+        (row[0], int(row[1]), int(row[2]))
+        for row in connection.execute(
+            """
+            SELECT planned_entry_trade_date, start_row_number, end_row_number
+            FROM portfolio_plan_entry_date_ranges
+            ORDER BY planned_entry_trade_date
+            """
+        ).fetchall()
+    ]
+    phase_seconds["prepare_source_seconds"] = perf_counter() - phase_started
+
+    _update_portfolio_plan_run_message_sql(
+        connection=connection,
+        run_id=run_id,
+        message=(
+            "portfolio_plan slow path prepared: "
+            f"source_rows={int(connection.execute('SELECT COUNT(*) FROM portfolio_plan_ordered_source').fetchone()[0])}, "
+            f"entry_dates={len(entry_dates)}"
         ),
-        planned_rows AS (
+    )
+
+    phase_started = perf_counter()
+    null_entry_rows = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM portfolio_plan_ordered_source WHERE planned_entry_trade_date IS NULL"
+        ).fetchone()[0]
+    )
+    if null_entry_rows:
+        connection.execute(
+            f"""
+            INSERT INTO portfolio_plan_materialized
             SELECT
-                row_number,
+                CONCAT(
+                    ?,
+                    ':',
+                    candidate_nk,
+                    ':',
+                    COALESCE(CAST(reference_trade_date AS VARCHAR), 'None'),
+                    ':',
+                    ?
+                ) AS plan_snapshot_nk,
                 candidate_nk,
+                ? AS portfolio_id,
                 symbol,
                 reference_trade_date,
                 planned_entry_trade_date,
                 scheduled_exit_trade_date,
-                signal_date,
-                candidate_status,
-                blocked_reason_code,
-                planned_exit_reason_code,
                 position_action_decision,
                 requested_weight,
-                CAST(0.0 AS DOUBLE) AS current_portfolio_gross_weight,
-                CASE
-                    WHEN candidate_status != 'admitted' THEN 'blocked'
-                    WHEN requested_weight <= 0 THEN 'blocked'
-                    WHEN planned_entry_trade_date IS NULL THEN 'blocked'
-                    WHEN {portfolio_gross_cap_weight} >= requested_weight THEN 'admitted'
-                    WHEN {portfolio_gross_cap_weight} > 0 THEN 'trimmed'
-                    ELSE 'blocked'
-                END AS plan_status,
+                0.0 AS admitted_weight,
+                0.0 AS trimmed_weight,
+                'blocked' AS plan_status,
                 CASE
                     WHEN candidate_status != 'admitted' THEN COALESCE(blocked_reason_code, 'candidate_blocked')
                     WHEN requested_weight <= 0 THEN 'no_position_capacity'
-                    WHEN planned_entry_trade_date IS NULL THEN 'missing_next_execution_trade_date'
-                    WHEN {portfolio_gross_cap_weight} >= requested_weight THEN NULL
-                    WHEN {portfolio_gross_cap_weight} > 0 THEN 'portfolio_capacity_trimmed'
-                    ELSE 'portfolio_capacity_exhausted'
-                END AS plan_blocking_reason_code,
-                CASE
-                    WHEN candidate_status = 'admitted' AND requested_weight > 0 AND planned_entry_trade_date IS NOT NULL
-                        THEN ROUND(LEAST(requested_weight, {portfolio_gross_cap_weight}), 4)
-                    ELSE 0.0
-                END AS admitted_weight
-            FROM ordered_rows
-            WHERE row_number = 1
+                    ELSE 'missing_next_execution_trade_date'
+                END AS blocking_reason_code,
+                planned_exit_reason_code,
+                {portfolio_gross_cap_weight} AS portfolio_gross_cap_weight,
+                0.0 AS current_portfolio_gross_weight,
+                {portfolio_gross_cap_weight} AS remaining_portfolio_capacity_weight,
+                0.0 AS portfolio_gross_used_weight,
+                {portfolio_gross_cap_weight} AS portfolio_gross_remaining_weight,
+                ? AS portfolio_plan_contract_version
+            FROM portfolio_plan_ordered_source
+            WHERE planned_entry_trade_date IS NULL
+            """,
+            [portfolio_id, PORTFOLIO_PLAN_CONTRACT_VERSION, portfolio_id, PORTFOLIO_PLAN_CONTRACT_VERSION],
+        )
 
-            UNION ALL
+    exit_weight_by_date: dict[date, float] = {}
+    exit_dates_heap: list[date] = []
+    active_gross_weight = 0.0
+    materialized_rows = null_entry_rows
+    processed_dates = 0
+    for entry_trade_date, start_row_number, end_row_number in entry_dates:
+        while exit_dates_heap and exit_dates_heap[0] <= entry_trade_date:
+            expired_trade_date = heappop(exit_dates_heap)
+            expired_weight = exit_weight_by_date.pop(expired_trade_date, 0.0)
+            active_gross_weight = _round_weight(max(active_gross_weight - expired_weight, 0.0))
 
-            SELECT
-                next_row.row_number,
-                next_row.candidate_nk,
-                next_row.symbol,
-                next_row.reference_trade_date,
-                next_row.planned_entry_trade_date,
-                next_row.scheduled_exit_trade_date,
-                next_row.signal_date,
-                next_row.candidate_status,
-                next_row.blocked_reason_code,
-                next_row.planned_exit_reason_code,
-                next_row.position_action_decision,
-                next_row.requested_weight,
-                active_positions.current_portfolio_gross_weight,
-                CASE
-                    WHEN next_row.candidate_status != 'admitted' THEN 'blocked'
-                    WHEN next_row.requested_weight <= 0 THEN 'blocked'
-                    WHEN next_row.planned_entry_trade_date IS NULL THEN 'blocked'
-                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight >= next_row.requested_weight THEN 'admitted'
-                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight > 0 THEN 'trimmed'
-                    ELSE 'blocked'
-                END AS plan_status,
-                CASE
-                    WHEN next_row.candidate_status != 'admitted' THEN COALESCE(next_row.blocked_reason_code, 'candidate_blocked')
-                    WHEN next_row.requested_weight <= 0 THEN 'no_position_capacity'
-                    WHEN next_row.planned_entry_trade_date IS NULL THEN 'missing_next_execution_trade_date'
-                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight >= next_row.requested_weight THEN NULL
-                    WHEN {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight > 0 THEN 'portfolio_capacity_trimmed'
-                    ELSE 'portfolio_capacity_exhausted'
-                END AS plan_blocking_reason_code,
-                CASE
-                    WHEN next_row.candidate_status = 'admitted'
-                        AND next_row.requested_weight > 0
-                        AND next_row.planned_entry_trade_date IS NOT NULL
-                        AND {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight >= next_row.requested_weight
-                        THEN ROUND(next_row.requested_weight, 4)
-                    WHEN next_row.candidate_status = 'admitted'
-                        AND next_row.requested_weight > 0
-                        AND next_row.planned_entry_trade_date IS NOT NULL
-                        AND {portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight > 0
-                        THEN ROUND({portfolio_gross_cap_weight} - active_positions.current_portfolio_gross_weight, 4)
-                    ELSE 0.0
-                END AS admitted_weight
-            FROM planned_rows AS prior_row
-            INNER JOIN ordered_rows AS next_row
-                ON next_row.row_number = prior_row.row_number + 1
-            CROSS JOIN LATERAL (
+        carry_in_weight = _round_weight(active_gross_weight)
+        connection.execute(
+            f"""
+            CREATE OR REPLACE TEMP TABLE portfolio_plan_current_batch AS
+            WITH batch_rows AS (
                 SELECT
-                    COALESCE(SUM(previous.admitted_weight), 0.0) AS current_portfolio_gross_weight
-                FROM planned_rows AS previous
-                WHERE previous.row_number < next_row.row_number
-                    AND previous.admitted_weight > 0
-                    AND next_row.planned_entry_trade_date IS NOT NULL
-                    AND (
-                        previous.scheduled_exit_trade_date IS NULL
-                        OR previous.scheduled_exit_trade_date > next_row.planned_entry_trade_date
-                    )
-            ) AS active_positions
-        ),
-        weighted_rows AS (
+                    *,
+                    CASE
+                        WHEN candidate_status = 'admitted' AND requested_weight > 0 THEN requested_weight
+                        ELSE 0.0
+                    END AS eligible_requested_weight
+                FROM portfolio_plan_ordered_source
+                WHERE global_row_number BETWEEN ? AND ?
+            ),
+            batch_with_prefix AS (
+                SELECT
+                    *,
+                    COALESCE(
+                        SUM(eligible_requested_weight) OVER (
+                            ORDER BY entry_row_number
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                        ),
+                        0.0
+                    ) AS eligible_requested_before_weight
+                FROM batch_rows
+            ),
+            weighted_rows AS (
+                SELECT
+                    candidate_nk,
+                    symbol,
+                    reference_trade_date,
+                    planned_entry_trade_date,
+                    scheduled_exit_trade_date,
+                    position_action_decision,
+                    requested_weight,
+                    planned_exit_reason_code,
+                    candidate_status,
+                    blocked_reason_code,
+                    ROUND(
+                        {carry_in_weight}
+                        + LEAST(
+                            eligible_requested_before_weight,
+                            GREATEST({portfolio_gross_cap_weight} - {carry_in_weight}, 0.0)
+                        ),
+                        4
+                    ) AS current_portfolio_gross_weight,
+                    ROUND(
+                        GREATEST(
+                            GREATEST({portfolio_gross_cap_weight} - {carry_in_weight}, 0.0)
+                            - eligible_requested_before_weight,
+                            0.0
+                        ),
+                        4
+                    ) AS available_before_weight
+                FROM batch_with_prefix
+            ),
+            materialized_rows AS (
+                SELECT
+                    candidate_nk,
+                    symbol,
+                    reference_trade_date,
+                    planned_entry_trade_date,
+                    scheduled_exit_trade_date,
+                    position_action_decision,
+                    requested_weight,
+                    planned_exit_reason_code,
+                    current_portfolio_gross_weight,
+                    CASE
+                        WHEN candidate_status != 'admitted' THEN 'blocked'
+                        WHEN requested_weight <= 0 THEN 'blocked'
+                        WHEN available_before_weight >= requested_weight THEN 'admitted'
+                        WHEN available_before_weight > 0 THEN 'trimmed'
+                        ELSE 'blocked'
+                    END AS plan_status,
+                    CASE
+                        WHEN candidate_status != 'admitted' THEN COALESCE(blocked_reason_code, 'candidate_blocked')
+                        WHEN requested_weight <= 0 THEN 'no_position_capacity'
+                        WHEN available_before_weight >= requested_weight THEN NULL
+                        WHEN available_before_weight > 0 THEN 'portfolio_capacity_trimmed'
+                        ELSE 'portfolio_capacity_exhausted'
+                    END AS blocking_reason_code,
+                    CASE
+                        WHEN candidate_status = 'admitted' AND requested_weight > 0 AND available_before_weight >= requested_weight
+                            THEN ROUND(requested_weight, 4)
+                        WHEN candidate_status = 'admitted' AND requested_weight > 0 AND available_before_weight > 0
+                            THEN ROUND(available_before_weight, 4)
+                        ELSE 0.0
+                    END AS admitted_weight
+                FROM weighted_rows
+            )
             SELECT
-                *,
+                CONCAT(
+                    ?,
+                    ':',
+                    candidate_nk,
+                    ':',
+                    COALESCE(CAST(reference_trade_date AS VARCHAR), 'None'),
+                    ':',
+                    ?
+                ) AS plan_snapshot_nk,
+                candidate_nk,
+                ? AS portfolio_id,
+                symbol,
+                reference_trade_date,
+                planned_entry_trade_date,
+                scheduled_exit_trade_date,
+                position_action_decision,
+                requested_weight,
+                admitted_weight,
                 CASE
                     WHEN plan_status = 'trimmed' THEN ROUND(requested_weight - admitted_weight, 4)
                     ELSE 0.0
                 END AS trimmed_weight,
+                plan_status,
+                blocking_reason_code,
+                planned_exit_reason_code,
+                {portfolio_gross_cap_weight} AS portfolio_gross_cap_weight,
+                current_portfolio_gross_weight,
+                ROUND(
+                    GREATEST({portfolio_gross_cap_weight} - (current_portfolio_gross_weight + admitted_weight), 0.0),
+                    4
+                ) AS remaining_portfolio_capacity_weight,
                 ROUND(current_portfolio_gross_weight + admitted_weight, 4) AS portfolio_gross_used_weight,
                 ROUND(
                     GREATEST({portfolio_gross_cap_weight} - (current_portfolio_gross_weight + admitted_weight), 0.0),
                     4
-                ) AS remaining_portfolio_capacity_weight
-            FROM planned_rows
+                ) AS portfolio_gross_remaining_weight,
+                ? AS portfolio_plan_contract_version
+            FROM materialized_rows
+            ORDER BY planned_entry_trade_date, reference_trade_date, candidate_nk
+            """,
+            [
+                start_row_number,
+                end_row_number,
+                portfolio_id,
+                PORTFOLIO_PLAN_CONTRACT_VERSION,
+                portfolio_id,
+                PORTFOLIO_PLAN_CONTRACT_VERSION,
+            ],
         )
-        SELECT
-            CONCAT(
-                ?,
-                ':',
-                candidate_nk,
-                ':',
-                COALESCE(CAST(reference_trade_date AS VARCHAR), 'None'),
-                ':',
-                ?
-            ) AS plan_snapshot_nk,
-            candidate_nk,
-            ? AS portfolio_id,
-            symbol,
-            reference_trade_date,
-            planned_entry_trade_date,
-            scheduled_exit_trade_date,
-            position_action_decision,
-            requested_weight,
-            admitted_weight,
-            trimmed_weight,
-            plan_status,
-            plan_blocking_reason_code AS blocking_reason_code,
-            planned_exit_reason_code,
-            {portfolio_gross_cap_weight} AS portfolio_gross_cap_weight,
-            current_portfolio_gross_weight,
-            remaining_portfolio_capacity_weight,
-            portfolio_gross_used_weight,
-            remaining_portfolio_capacity_weight AS portfolio_gross_remaining_weight,
-            ? AS portfolio_plan_contract_version
-        FROM weighted_rows
-        """,
-        [portfolio_id, PORTFOLIO_PLAN_CONTRACT_VERSION, portfolio_id, PORTFOLIO_PLAN_CONTRACT_VERSION],
+        connection.execute(
+            """
+            INSERT INTO portfolio_plan_materialized
+            SELECT *
+            FROM portfolio_plan_current_batch
+            """
+        )
+
+        batch_rows, admitted_today = connection.execute(
+            """
+            SELECT COUNT(*), COALESCE(ROUND(SUM(admitted_weight), 4), 0.0)
+            FROM portfolio_plan_current_batch
+            """
+        ).fetchone()
+        materialized_rows += int(batch_rows)
+        active_gross_weight = _round_weight(active_gross_weight + float(admitted_today))
+        processed_dates += 1
+
+        for scheduled_exit_trade_date, exit_weight in connection.execute(
+            """
+            SELECT scheduled_exit_trade_date, ROUND(SUM(admitted_weight), 4)
+            FROM portfolio_plan_current_batch
+            WHERE admitted_weight > 0 AND scheduled_exit_trade_date IS NOT NULL
+            GROUP BY scheduled_exit_trade_date
+            """
+        ).fetchall():
+            updated_weight = _round_weight(exit_weight_by_date.get(scheduled_exit_trade_date, 0.0) + float(exit_weight))
+            if scheduled_exit_trade_date not in exit_weight_by_date:
+                heappush(exit_dates_heap, scheduled_exit_trade_date)
+            exit_weight_by_date[scheduled_exit_trade_date] = updated_weight
+
+        if (
+            processed_dates % PORTFOLIO_PLAN_PROGRESS_UPDATE_INTERVAL == 0
+            or processed_dates == len(entry_dates)
+        ):
+            _update_portfolio_plan_run_message_sql(
+                connection=connection,
+                run_id=run_id,
+                message=(
+                    "portfolio_plan slow path running: "
+                    f"dates={processed_dates}/{len(entry_dates)}, "
+                    f"latest_entry_trade_date={entry_trade_date.isoformat()}, "
+                    f"materialized_rows={materialized_rows}, "
+                    f"active_gross_weight={active_gross_weight:.4f}"
+                ),
+            )
+    phase_seconds["materialize_batches_seconds"] = perf_counter() - phase_started
+
+    _update_portfolio_plan_run_message_sql(
+        connection=connection,
+        run_id=run_id,
+        message=(
+            "portfolio_plan slow path finished date batches: "
+            f"dates={len(entry_dates)}/{len(entry_dates)}, "
+            f"materialized_rows={materialized_rows}. "
+            "Building materialized_with_action join."
+        ),
     )
+    phase_started = perf_counter()
+    connection.execute(
+        """
+        CREATE INDEX portfolio_plan_materialized_nk_idx
+        ON portfolio_plan_materialized (plan_snapshot_nk)
+        """
+    )
+    phase_seconds["materialized_index_seconds"] = perf_counter() - phase_started
+
+    phase_started = perf_counter()
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE portfolio_plan_materialized_with_action AS
@@ -538,9 +745,21 @@ def _materialize_portfolio_plan_sql(
             ON existing.plan_snapshot_nk = materialized.plan_snapshot_nk
         """
     )
+    phase_seconds["materialized_with_action_seconds"] = perf_counter() - phase_started
+    _update_portfolio_plan_run_message_sql(
+        connection=connection,
+        run_id=run_id,
+        message="portfolio_plan slow path built materialized_with_action. Starting committed snapshot replace.",
+    )
+    phase_started = perf_counter()
     try:
         connection.execute("BEGIN TRANSACTION")
         connection.execute("DELETE FROM portfolio_plan_snapshot WHERE portfolio_id = ?", [portfolio_id])
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message="portfolio_plan committed replace: old snapshot deleted; inserting new snapshot rows.",
+        )
         connection.execute(
             """
             INSERT INTO portfolio_plan_snapshot (
@@ -579,6 +798,11 @@ def _materialize_portfolio_plan_sql(
             """,
             [run_id, run_id],
         )
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message="portfolio_plan committed replace: snapshot inserted; writing run_snapshot rows.",
+        )
         connection.execute(
             """
             INSERT INTO portfolio_plan_run_snapshot (
@@ -589,12 +813,18 @@ def _materialize_portfolio_plan_sql(
             """,
             [run_id],
         )
+        _update_portfolio_plan_run_message_sql(
+            connection=connection,
+            run_id=run_id,
+            message="portfolio_plan committed replace: run_snapshot inserted; updating work_queue and checkpoint.",
+        )
         _insert_portfolio_plan_work_queue_sql(connection=connection, run_id=run_id, status="completed")
         _upsert_portfolio_plan_checkpoint_sql(connection=connection, run_id=run_id)
         connection.execute("COMMIT")
     except Exception:
         connection.execute("ROLLBACK")
         raise
+    phase_seconds["commit_seconds"] = perf_counter() - phase_started
     status_counts = dict(
         connection.execute(
             """
@@ -617,6 +847,19 @@ def _materialize_portfolio_plan_sql(
         },
         1,
         latest_reference_trade_date,
+        (
+            "portfolio_plan run completed. "
+            "slow_path=date_batched "
+            f"entry_dates={len(entry_dates)} "
+            f"materialized_rows={snapshot_rows} "
+            f"null_entry_rows={null_entry_rows} "
+            f"timings={{existing_snapshot_seconds={phase_seconds['existing_snapshot_seconds']:.3f}, "
+            f"prepare_source_seconds={phase_seconds['prepare_source_seconds']:.3f}, "
+            f"materialize_batches_seconds={phase_seconds['materialize_batches_seconds']:.3f}, "
+            f"materialized_index_seconds={phase_seconds['materialized_index_seconds']:.3f}, "
+            f"materialized_with_action_seconds={phase_seconds['materialized_with_action_seconds']:.3f}, "
+            f"commit_seconds={phase_seconds['commit_seconds']:.3f}}}"
+        ),
     )
 
 
@@ -669,6 +912,30 @@ def _upsert_portfolio_plan_checkpoint_sql(*, connection: duckdb.DuckDBPyConnecti
         """,
         [run_id],
     )
+
+
+def _update_portfolio_plan_run_message_sql(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    message: str,
+) -> None:
+    try:
+        print(message, file=sys.stderr, flush=True)
+    except OSError:
+        pass
+    connection.execute(
+        """
+        UPDATE portfolio_plan_run
+        SET message = ?
+        WHERE run_id = ? AND finished_at IS NULL
+        """,
+        [message, run_id],
+    )
+
+
+def _round_weight(value: float) -> float:
+    return round(float(value), 4)
 
 
 def _duckdb_string_literal(path: Path) -> str:

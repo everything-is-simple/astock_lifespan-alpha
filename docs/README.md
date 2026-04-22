@@ -58,6 +58,7 @@ card -> evidence -> record -> conclusion
 38. `docs/02-spec/21-stage-sixteen-portfolio-plan-system-pipeline-incremental-resume-spec-v1-20260421.md`
 39. `docs/03-execution/45-stage-sixteen-incremental-resume-spec-freeze-conclusion-20260421.md`
 40. `docs/03-execution/46-stage-sixteen-incremental-resume-engineering-closeout-conclusion-20260421.md`
+41. `docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`
 41. `docs/02-spec/22-stage-seventeen-rolling-backtest-minimal-v1-spec-20260421.md`
 
 ## 目录职责
@@ -269,8 +270,10 @@ Stage-five engineering defaults are frozen:
 - 治理面板结论：`docs/03-execution/47-mainline-module-freeze-campaign-governance-board-conclusion-20260422.md`
 - `position` 放行结论：`docs/03-execution/48-position-stage-seventeen-live-freeze-gate-and-release-conclusion-20260422.md`
 - `portfolio_plan` freeze gate 结论：`docs/03-execution/49-portfolio-plan-stage-seventeen-live-freeze-gate-conclusion-20260422.md`
+- `portfolio_plan` Card 50 结论：`docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`
 - 当前主线冻结战役按 `position -> portfolio_plan -> trade -> system -> pipeline -> alpha -> malf -> data` 顺序推进
 - 当前状态为 `position = 放行`，`portfolio_plan = 待修`
 - 当前活跃模块为 `portfolio_plan`
 - `portfolio_plan` 当前 blocker 已更新为 live `0.50` cutover stall，而不是语义未定义
+- Card 50 之后，`portfolio_plan` 已完成按日分批 slow path 与 progress logging 修复，但 committed replace 尾段仍未在验证窗口内完成
 - 当前批次不宣告 `position` 冻结，只登记 live freeze gate 已通过
