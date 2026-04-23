@@ -8,7 +8,6 @@ import duckdb
 from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_plan_schema
 from astock_lifespan_alpha.trade import TradeRunSummary, run_trade_from_portfolio_plan
-import astock_lifespan_alpha.trade.runner as trade_runner_module
 from astock_lifespan_alpha.trade.runner import profile_trade_live_path
 from astock_lifespan_alpha.trade.schema import TRADE_TABLES, initialize_trade_schema
 from astock_lifespan_alpha.trade.source import load_trade_source_rows
@@ -286,11 +285,11 @@ def test_trade_runner_reuses_same_input_and_rematerializes_changed_work_unit(mon
     assert execution_weight == 0.05
 
 
-def test_trade_runner_batches_target_deletes_by_work_unit(monkeypatch, tmp_path, capsys):
+def test_trade_runner_stages_target_cutover_by_work_unit(monkeypatch, tmp_path, capsys):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
-    monkeypatch.setattr(trade_runner_module, "TRADE_DELETE_WORK_UNIT_BATCH_SIZE", 1)
     market_path = workspace / "data" / "base" / "market_base.duckdb"
     portfolio_plan_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
+    trade_path = workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"
     _write_market_base_day(
         market_path,
         [
@@ -329,13 +328,11 @@ def test_trade_runner_batches_target_deletes_by_work_unit(monkeypatch, tmp_path,
     stderr = capsys.readouterr().err
 
     assert summary.checkpoint_summary.work_units_updated == 1
-    assert "write_delete_trade_order_execution_batch" in stderr
-    assert "batch_index=2 batch_count=2" in stderr
-    assert "write_delete_trade_order_intent_done" in stderr
-    with duckdb.connect(
-        str(workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"),
-        read_only=True,
-    ) as connection:
+    assert "write_stage_trade_order_intent_done" in stderr
+    assert "write_stage_trade_run_order_intent_done" in stderr
+    assert "write_cutover_committed" in stderr
+    assert "write_transaction_committed" in stderr
+    with duckdb.connect(str(trade_path), read_only=True) as connection:
         rows = connection.execute(
             """
             SELECT candidate_nk, execution_weight
@@ -345,9 +342,112 @@ def test_trade_runner_batches_target_deletes_by_work_unit(monkeypatch, tmp_path,
             """
         ).fetchall()
         execution_count = connection.execute("SELECT COUNT(*) FROM trade_order_execution").fetchone()[0]
+        tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        indexes = {row[0] for row in connection.execute("SELECT index_name FROM duckdb_indexes()").fetchall()}
+        primary_keys = {
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT table_name
+                FROM duckdb_constraints()
+                WHERE table_name IN ('trade_order_intent', 'trade_work_queue', 'trade_run_order_intent')
+                    AND constraint_type = 'PRIMARY KEY'
+                """
+            ).fetchall()
+        }
 
     assert rows == [("candidate:batch:1", 0.10), ("candidate:batch:2", 0.05)]
     assert execution_count == 2
+    assert not any("_stage_" in table_name or "_backup_" in table_name for table_name in tables)
+    assert {
+        "idx_trade_intent_work_unit",
+        "idx_trade_execution_work_unit",
+        "idx_trade_position_leg_work_unit",
+    }.issubset(indexes)
+    assert {"trade_order_intent", "trade_work_queue", "trade_run_order_intent"}.issubset(primary_keys)
+
+
+def test_trade_runner_cutover_preserves_non_source_work_units(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    market_path = workspace / "data" / "base" / "market_base.duckdb"
+    portfolio_plan_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
+    trade_path = workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"
+    _write_market_base_day(
+        market_path,
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        portfolio_plan_path,
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:core",
+                candidate_nk="candidate:core",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.10,
+                plan_status="admitted",
+            ),
+        ],
+    )
+
+    first_summary = run_trade_from_portfolio_plan()
+    with duckdb.connect(str(trade_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO trade_order_intent (
+                order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
+                reference_trade_date, planned_trade_date, position_action_decision, intent_status,
+                requested_weight, admitted_weight, execution_weight, blocking_reason_code,
+                trade_contract_version, first_seen_run_id, last_materialized_run_id
+            ) VALUES (
+                'outside:intent', 'outside:plan', 'candidate:outside', 'sidecar', 'ZZZ',
+                DATE '2026-01-03', DATE '2026-01-04', 'open', 'planned',
+                0.01, 0.01, 0.01, NULL, 'stage5_trade_v1', 'outside-run', 'outside-run'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO trade_checkpoint (
+                portfolio_id, symbol, last_reference_trade_date, last_source_fingerprint, last_run_id
+            ) VALUES ('sidecar', 'ZZZ', DATE '2026-01-03', 'outside-fingerprint', 'outside-run')
+            """
+        )
+
+    _update_admitted_weight(portfolio_plan_path, plan_snapshot_nk="plan:core", admitted_weight=0.05)
+    second_summary = run_trade_from_portfolio_plan()
+
+    with duckdb.connect(str(trade_path), read_only=True) as connection:
+        intents = connection.execute(
+            """
+            SELECT portfolio_id, candidate_nk, execution_weight
+            FROM trade_order_intent
+            ORDER BY portfolio_id, candidate_nk
+            """
+        ).fetchall()
+        checkpoint_runs = connection.execute(
+            """
+            SELECT portfolio_id, symbol, last_run_id
+            FROM trade_checkpoint
+            ORDER BY portfolio_id, symbol
+            """
+        ).fetchall()
+        work_queue_rows = connection.execute(
+            "SELECT portfolio_id, symbol FROM trade_work_queue ORDER BY portfolio_id, symbol"
+        ).fetchall()
+
+    assert first_summary.run_id != second_summary.run_id
+    assert intents == [
+        ("core", "candidate:core", 0.05),
+        ("sidecar", "candidate:outside", 0.01),
+    ]
+    assert checkpoint_runs == [
+        ("core", "AAA", second_summary.run_id),
+        ("sidecar", "ZZZ", "outside-run"),
+    ]
+    assert work_queue_rows == [("core", "AAA")]
 
 
 def test_trade_runner_materializes_exit_and_carry_rows(monkeypatch, tmp_path):

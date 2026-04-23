@@ -318,3 +318,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/53-trade-delete-path-unblock-conclusion-20260423.md`
 - 裁决：`已记录，trade 待修`
 - 说明：Card 53 已将 target-table delete 拆成表级与 batch 级阶段；正式 run `trade-258bd7bafa7d` 已越过 `write_targets_cleared / write_output_tables_loaded / write_tracking_tables_loaded`，证明 delete path 已解除，但 run 在 `write_transaction_committed` 前无进展并已标记为 `interrupted`，因此 `trade` 继续保持 `待修`，`system` 继续冻结。
+
+### `54` trade commit cutover
+
+- 结论文档：`docs/03-execution/54-trade-commit-cutover-conclusion-20260423.md`
+- 裁决：`已接受，trade 放行`
+- 说明：Card 54 已将 `trade` 正式写入尾段改为 staged target table replacement，并用短事务完成正式表 rename cutover；正式 run `trade-558802e7f7a4` 已 `completed`，`write_cutover_committed / write_transaction_committed` 均已出现，`trade_checkpoint.last_run_id` 已全量切新，正式 position/carry/exit 表已落地且无 staging/backup 残留，因此 `trade = 放行`，下一活跃模块切到 `system`。

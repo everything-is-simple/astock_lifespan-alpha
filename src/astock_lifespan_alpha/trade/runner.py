@@ -26,6 +26,21 @@ from astock_lifespan_alpha.trade.schema import initialize_trade_schema
 
 DAY_TABLE_CANDIDATES = ("stock_daily_adjusted", "market_base_day", "bars_day", "price_bar_day", "market_day")
 TRADE_DELETE_WORK_UNIT_BATCH_SIZE = 250
+TRADE_CUTOVER_TARGET_TABLES = (
+    "trade_order_intent",
+    "trade_order_execution",
+    "trade_position_leg",
+    "trade_carry_snapshot",
+    "trade_exit_execution",
+    "trade_work_queue",
+    "trade_checkpoint",
+    "trade_run_order_intent",
+)
+TRADE_SECONDARY_INDEXES = (
+    ("idx_trade_intent_work_unit", "trade_order_intent", "(portfolio_id, symbol, reference_trade_date)"),
+    ("idx_trade_execution_work_unit", "trade_order_execution", "(portfolio_id, symbol, execution_trade_date)"),
+    ("idx_trade_position_leg_work_unit", "trade_position_leg", "(portfolio_id, symbol, entry_trade_date)"),
+)
 
 
 @dataclass(frozen=True)
@@ -1077,201 +1092,39 @@ def _materialize_trade_sql(
     if write_outputs:
         if phase_observer is not None:
             phase_observer(
-                "write_transaction_started",
+                "write_stage_targets_started",
                 elapsed_seconds=0.0,
                 row_count=work_unit_count,
                 detail=f"work_units_updated={work_units_updated}",
             )
         phase_started = perf_counter()
-        try:
-            connection.execute("BEGIN TRANSACTION")
-            delete_started = perf_counter()
-            _delete_trade_targets_in_batches(
-                connection=connection,
-                phase_observer=phase_observer,
-                batch_size=TRADE_DELETE_WORK_UNIT_BATCH_SIZE,
-            )
-            _record_phase(
-                connection=connection,
-                phase_observer=phase_observer,
-                phase="write_targets_cleared",
-                started_at=delete_started,
-                table_name="trade_source_work_unit_summary",
-                detail=f"work_units_updated={work_units_updated}",
-            )
-            insert_started = perf_counter()
-            connection.execute(
-                """
-                INSERT INTO trade_order_intent (
-                    order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
-                    reference_trade_date, planned_trade_date, position_action_decision, intent_status,
-                    requested_weight, admitted_weight, execution_weight, blocking_reason_code,
-                    trade_contract_version, first_seen_run_id, last_materialized_run_id
-                )
-                SELECT
-                    order_intent_nk,
-                    plan_snapshot_nk,
-                    candidate_nk,
-                    portfolio_id,
-                    symbol,
-                    reference_trade_date,
-                    planned_trade_date,
-                    position_action_decision,
-                    intent_status,
-                    requested_weight,
-                    admitted_weight,
-                    execution_weight,
-                    blocking_reason_code,
-                    ?,
-                    COALESCE(existing_first_seen_run_id, ?),
-                    ?
-                FROM trade_materialized_intent_with_action
-                """,
-                [TRADE_CONTRACT_VERSION, run_id, run_id],
-            )
-            connection.execute(
-                """
-                INSERT INTO trade_order_execution (
-                    order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
-                    execution_trade_date, execution_price, executed_weight, blocking_reason_code,
-                    source_price_line, trade_contract_version, first_seen_run_id, last_materialized_run_id
-                )
-                SELECT
-                    order_execution_nk,
-                    order_intent_nk,
-                    portfolio_id,
-                    symbol,
-                    execution_status,
-                    execution_trade_date,
-                    execution_price,
-                    executed_weight,
-                    blocking_reason_code,
-                    source_price_line,
-                    ?,
-                    COALESCE(existing_first_seen_run_id, ?),
-                    ?
-                FROM trade_materialized_execution_with_action
-                """,
-                [TRADE_CONTRACT_VERSION, run_id, run_id],
-            )
-            connection.execute(
-                """
-                INSERT INTO trade_position_leg (
-                    position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
-                    entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
-                    scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
-                    exit_execution_price, active_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
-                )
-                SELECT
-                    position_leg_nk,
-                    candidate_nk,
-                    order_intent_nk,
-                    portfolio_id,
-                    symbol,
-                    entry_reference_trade_date,
-                    entry_trade_date,
-                    entry_execution_price,
-                    position_weight,
-                    scheduled_exit_trade_date,
-                    position_state,
-                    exit_execution_nk,
-                    exit_trade_date,
-                    exit_execution_price,
-                    active_weight,
-                    ?,
-                    COALESCE(existing_first_seen_run_id, ?),
-                    ?
-                FROM trade_materialized_position_leg_with_action
-                """,
-                [TRADE_CONTRACT_VERSION, run_id, run_id],
-            )
-            connection.execute(
-                """
-                INSERT INTO trade_carry_snapshot (
-                    carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
-                    carry_status, carried_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
-                )
-                SELECT
-                    carry_snapshot_nk,
-                    position_leg_nk,
-                    portfolio_id,
-                    symbol,
-                    as_of_trade_date,
-                    carry_status,
-                    carried_weight,
-                    ?,
-                    COALESCE(existing_first_seen_run_id, ?),
-                    ?
-                FROM trade_materialized_carry_snapshot_with_action
-                """,
-                [TRADE_CONTRACT_VERSION, run_id, run_id],
-            )
-            connection.execute(
-                """
-                INSERT INTO trade_exit_execution (
-                    exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
-                    exit_trade_date, execution_status, execution_price, exited_weight,
-                    blocking_reason_code, exit_reason_code, source_price_line,
-                    trade_contract_version, first_seen_run_id, last_materialized_run_id
-                )
-                SELECT
-                    exit_execution_nk,
-                    position_leg_nk,
-                    candidate_nk,
-                    portfolio_id,
-                    symbol,
-                    exit_trade_date,
-                    execution_status,
-                    execution_price,
-                    exited_weight,
-                    blocking_reason_code,
-                    exit_reason_code,
-                    source_price_line,
-                    ?,
-                    COALESCE(existing_first_seen_run_id, ?),
-                    ?
-                FROM trade_materialized_exit_execution_with_action
-                """,
-                [TRADE_CONTRACT_VERSION, run_id, run_id],
-            )
-            _record_phase(
-                connection=connection,
-                phase_observer=phase_observer,
-                phase="write_output_tables_loaded",
-                started_at=insert_started,
-                table_name="trade_exit_execution",
-                detail=f"work_units_updated={work_units_updated}",
-            )
-            tracking_started = perf_counter()
-            connection.execute(
-                """
-                INSERT INTO trade_run_order_intent (
-                    run_id, order_intent_nk, intent_status, materialization_action
-                )
-                SELECT ?, order_intent_nk, intent_status, materialization_action
-                FROM trade_materialized_intent_with_action
-                """,
-                [run_id],
-            )
-            _insert_trade_work_queue_sql(connection=connection, run_id=run_id, action_table_name="trade_work_unit_actions")
-            _upsert_trade_checkpoint_sql(connection=connection, run_id=run_id)
-            _record_phase(
-                connection=connection,
-                phase_observer=phase_observer,
-                phase="write_tracking_tables_loaded",
-                started_at=tracking_started,
-                table_name="trade_work_queue",
-                detail=f"work_units_updated={work_units_updated}",
-            )
-            connection.execute("COMMIT")
-        except Exception:
-            connection.execute("ROLLBACK")
-            raise
+        stage_tables = _stage_trade_target_tables(
+            connection=connection,
+            run_id=run_id,
+            phase_observer=phase_observer,
+            work_units_updated=work_units_updated,
+        )
+        _record_phase(
+            connection=connection,
+            phase_observer=phase_observer,
+            phase="write_stage_targets_done",
+            started_at=phase_started,
+            table_name=stage_tables["trade_work_queue"],
+            detail=f"work_units_updated={work_units_updated}",
+        )
+        cutover_started = perf_counter()
+        _cutover_trade_target_tables(
+            connection=connection,
+            run_id=run_id,
+            stage_tables=stage_tables,
+            phase_observer=phase_observer,
+            work_units_updated=work_units_updated,
+        )
         _record_phase(
             connection=connection,
             phase_observer=phase_observer,
             phase="write_transaction_committed",
-            started_at=phase_started,
+            started_at=cutover_started,
             table_name="trade_work_queue",
             detail=f"work_units_updated={work_units_updated}",
         )
@@ -1296,6 +1149,637 @@ def _materialize_trade_sql(
         work_units_updated,
         latest_reference_trade_date,
     )
+
+
+def _trade_run_table_token(run_id: str) -> str:
+    return "".join(character if character.isalnum() else "_" for character in run_id)
+
+
+def _trade_stage_table_name(*, table_name: str, run_id: str) -> str:
+    return f"{table_name}_stage_{_trade_run_table_token(run_id)}"
+
+
+def _trade_backup_table_name(*, table_name: str, run_id: str) -> str:
+    return f"{table_name}_backup_{_trade_run_table_token(run_id)}"
+
+
+def _drop_table_if_exists(*, connection: duckdb.DuckDBPyConnection, table_name: str) -> None:
+    connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+
+def _create_trade_target_table_schema(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    table_name: str,
+    target_table: str,
+) -> None:
+    if target_table == "trade_order_intent":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                order_intent_nk TEXT PRIMARY KEY,
+                plan_snapshot_nk TEXT NOT NULL,
+                candidate_nk TEXT NOT NULL,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                reference_trade_date DATE,
+                planned_trade_date DATE,
+                position_action_decision TEXT NOT NULL,
+                intent_status TEXT NOT NULL,
+                requested_weight DOUBLE NOT NULL,
+                admitted_weight DOUBLE NOT NULL,
+                execution_weight DOUBLE NOT NULL,
+                blocking_reason_code TEXT,
+                trade_contract_version TEXT NOT NULL,
+                first_seen_run_id TEXT NOT NULL,
+                last_materialized_run_id TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    elif target_table == "trade_order_execution":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                order_execution_nk TEXT PRIMARY KEY,
+                order_intent_nk TEXT NOT NULL,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                execution_status TEXT NOT NULL,
+                execution_trade_date DATE,
+                execution_price DOUBLE,
+                executed_weight DOUBLE NOT NULL,
+                blocking_reason_code TEXT,
+                source_price_line TEXT NOT NULL,
+                trade_contract_version TEXT NOT NULL,
+                first_seen_run_id TEXT NOT NULL,
+                last_materialized_run_id TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    elif target_table == "trade_position_leg":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                position_leg_nk TEXT PRIMARY KEY,
+                candidate_nk TEXT NOT NULL,
+                order_intent_nk TEXT,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                entry_reference_trade_date DATE,
+                entry_trade_date DATE,
+                entry_execution_price DOUBLE,
+                position_weight DOUBLE NOT NULL,
+                scheduled_exit_trade_date DATE,
+                position_state TEXT NOT NULL,
+                exit_execution_nk TEXT,
+                exit_trade_date DATE,
+                exit_execution_price DOUBLE,
+                active_weight DOUBLE NOT NULL,
+                trade_contract_version TEXT NOT NULL,
+                first_seen_run_id TEXT NOT NULL,
+                last_materialized_run_id TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    elif target_table == "trade_carry_snapshot":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                carry_snapshot_nk TEXT PRIMARY KEY,
+                position_leg_nk TEXT NOT NULL,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                as_of_trade_date DATE,
+                carry_status TEXT NOT NULL,
+                carried_weight DOUBLE NOT NULL,
+                trade_contract_version TEXT NOT NULL,
+                first_seen_run_id TEXT NOT NULL,
+                last_materialized_run_id TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    elif target_table == "trade_exit_execution":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                exit_execution_nk TEXT PRIMARY KEY,
+                position_leg_nk TEXT NOT NULL,
+                candidate_nk TEXT NOT NULL,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                exit_trade_date DATE,
+                execution_status TEXT NOT NULL,
+                execution_price DOUBLE,
+                exited_weight DOUBLE NOT NULL,
+                blocking_reason_code TEXT,
+                exit_reason_code TEXT,
+                source_price_line TEXT NOT NULL,
+                trade_contract_version TEXT NOT NULL,
+                first_seen_run_id TEXT NOT NULL,
+                last_materialized_run_id TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    elif target_table == "trade_work_queue":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                queue_id TEXT PRIMARY KEY,
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_row_count BIGINT NOT NULL DEFAULT 0,
+                last_reference_trade_date DATE,
+                source_fingerprint TEXT,
+                requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                claimed_at TIMESTAMP,
+                finished_at TIMESTAMP
+            )
+            """
+        )
+    elif target_table == "trade_checkpoint":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                portfolio_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                last_reference_trade_date DATE,
+                last_source_fingerprint TEXT,
+                last_run_id TEXT,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (portfolio_id, symbol)
+            )
+            """
+        )
+    elif target_table == "trade_run_order_intent":
+        connection.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                run_id TEXT NOT NULL,
+                order_intent_nk TEXT NOT NULL,
+                intent_status TEXT NOT NULL,
+                materialization_action TEXT NOT NULL,
+                recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (run_id, order_intent_nk)
+            )
+            """
+        )
+    else:
+        raise ValueError(f"Unsupported trade target table: {target_table}")
+
+
+def _source_work_unit_filter(*, row_alias: str) -> str:
+    return f"""
+        EXISTS (
+            SELECT 1
+            FROM trade_source_work_unit_summary AS source
+            WHERE source.portfolio_id = {row_alias}.portfolio_id
+                AND source.symbol = {row_alias}.symbol
+        )
+    """
+
+
+def _stage_trade_target_tables(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    phase_observer: Callable[..., None] | None,
+    work_units_updated: int,
+) -> dict[str, str]:
+    stage_tables = {
+        table_name: _trade_stage_table_name(table_name=table_name, run_id=run_id)
+        for table_name in TRADE_CUTOVER_TARGET_TABLES
+    }
+    for table_name in TRADE_CUTOVER_TARGET_TABLES:
+        _drop_table_if_exists(connection=connection, table_name=stage_tables[table_name])
+        _drop_table_if_exists(connection=connection, table_name=_trade_backup_table_name(table_name=table_name, run_id=run_id))
+        _create_trade_target_table_schema(
+            connection=connection,
+            table_name=stage_tables[table_name],
+            target_table=table_name,
+        )
+
+    stage_started = perf_counter()
+    _stage_trade_order_intent(connection=connection, stage_table=stage_tables["trade_order_intent"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_order_intent_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_order_intent"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_order_execution(connection=connection, stage_table=stage_tables["trade_order_execution"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_order_execution_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_order_execution"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_position_leg(connection=connection, stage_table=stage_tables["trade_position_leg"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_position_leg_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_position_leg"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_carry_snapshot(connection=connection, stage_table=stage_tables["trade_carry_snapshot"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_carry_snapshot_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_carry_snapshot"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_exit_execution(connection=connection, stage_table=stage_tables["trade_exit_execution"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_exit_execution_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_exit_execution"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_work_queue(connection=connection, stage_table=stage_tables["trade_work_queue"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_work_queue_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_work_queue"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_checkpoint(connection=connection, stage_table=stage_tables["trade_checkpoint"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_checkpoint_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_checkpoint"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    stage_started = perf_counter()
+    _stage_trade_run_order_intent(connection=connection, stage_table=stage_tables["trade_run_order_intent"], run_id=run_id)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_stage_trade_run_order_intent_done",
+        started_at=stage_started,
+        table_name=stage_tables["trade_run_order_intent"],
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    return stage_tables
+
+
+def _stage_trade_order_intent(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    source_filter = _source_work_unit_filter(row_alias="intent")
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
+            reference_trade_date, planned_trade_date, position_action_decision, intent_status,
+            requested_weight, admitted_weight, execution_weight, blocking_reason_code,
+            trade_contract_version, first_seen_run_id, last_materialized_run_id, created_at, updated_at
+        )
+        SELECT
+            order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
+            reference_trade_date, planned_trade_date, position_action_decision, intent_status,
+            requested_weight, admitted_weight, execution_weight, blocking_reason_code,
+            trade_contract_version, first_seen_run_id, last_materialized_run_id, created_at, updated_at
+        FROM trade_order_intent AS intent
+        WHERE NOT {source_filter}
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
+            reference_trade_date, planned_trade_date, position_action_decision, intent_status,
+            requested_weight, admitted_weight, execution_weight, blocking_reason_code,
+            trade_contract_version, first_seen_run_id, last_materialized_run_id
+        )
+        SELECT
+            order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
+            reference_trade_date, planned_trade_date, position_action_decision, intent_status,
+            requested_weight, admitted_weight, execution_weight, blocking_reason_code,
+            ?, COALESCE(existing_first_seen_run_id, ?), ?
+        FROM trade_materialized_intent_with_action
+        """,
+        [TRADE_CONTRACT_VERSION, run_id, run_id],
+    )
+
+
+def _stage_trade_order_execution(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    source_filter = _source_work_unit_filter(row_alias="execution")
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
+            execution_trade_date, execution_price, executed_weight, blocking_reason_code,
+            source_price_line, trade_contract_version, first_seen_run_id, last_materialized_run_id, created_at, updated_at
+        )
+        SELECT
+            order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
+            execution_trade_date, execution_price, executed_weight, blocking_reason_code,
+            source_price_line, trade_contract_version, first_seen_run_id, last_materialized_run_id, created_at, updated_at
+        FROM trade_order_execution AS execution
+        WHERE NOT {source_filter}
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
+            execution_trade_date, execution_price, executed_weight, blocking_reason_code,
+            source_price_line, trade_contract_version, first_seen_run_id, last_materialized_run_id
+        )
+        SELECT
+            order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
+            execution_trade_date, execution_price, executed_weight, blocking_reason_code,
+            source_price_line, ?, COALESCE(existing_first_seen_run_id, ?), ?
+        FROM trade_materialized_execution_with_action
+        """,
+        [TRADE_CONTRACT_VERSION, run_id, run_id],
+    )
+
+
+def _stage_trade_position_leg(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    source_filter = _source_work_unit_filter(row_alias="leg")
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
+            entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
+            scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
+            exit_execution_price, active_weight, trade_contract_version, first_seen_run_id,
+            last_materialized_run_id, created_at, updated_at
+        )
+        SELECT
+            position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
+            entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
+            scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
+            exit_execution_price, active_weight, trade_contract_version, first_seen_run_id,
+            last_materialized_run_id, created_at, updated_at
+        FROM trade_position_leg AS leg
+        WHERE NOT {source_filter}
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
+            entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
+            scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
+            exit_execution_price, active_weight, trade_contract_version, first_seen_run_id,
+            last_materialized_run_id
+        )
+        SELECT
+            position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
+            entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
+            scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
+            exit_execution_price, active_weight, ?, COALESCE(existing_first_seen_run_id, ?), ?
+        FROM trade_materialized_position_leg_with_action
+        """,
+        [TRADE_CONTRACT_VERSION, run_id, run_id],
+    )
+
+
+def _stage_trade_carry_snapshot(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    source_filter = _source_work_unit_filter(row_alias="carry")
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+            carry_status, carried_weight, trade_contract_version, first_seen_run_id,
+            last_materialized_run_id, created_at, updated_at
+        )
+        SELECT
+            carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+            carry_status, carried_weight, trade_contract_version, first_seen_run_id,
+            last_materialized_run_id, created_at, updated_at
+        FROM trade_carry_snapshot AS carry
+        WHERE NOT {source_filter}
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+            carry_status, carried_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+        )
+        SELECT
+            carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+            carry_status, carried_weight, ?, COALESCE(existing_first_seen_run_id, ?), ?
+        FROM trade_materialized_carry_snapshot_with_action
+        """,
+        [TRADE_CONTRACT_VERSION, run_id, run_id],
+    )
+
+
+def _stage_trade_exit_execution(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    source_filter = _source_work_unit_filter(row_alias="exit_execution")
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
+            exit_trade_date, execution_status, execution_price, exited_weight,
+            blocking_reason_code, exit_reason_code, source_price_line, trade_contract_version,
+            first_seen_run_id, last_materialized_run_id, created_at, updated_at
+        )
+        SELECT
+            exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
+            exit_trade_date, execution_status, execution_price, exited_weight,
+            blocking_reason_code, exit_reason_code, source_price_line, trade_contract_version,
+            first_seen_run_id, last_materialized_run_id, created_at, updated_at
+        FROM trade_exit_execution AS exit_execution
+        WHERE NOT {source_filter}
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
+            exit_trade_date, execution_status, execution_price, exited_weight,
+            blocking_reason_code, exit_reason_code, source_price_line, trade_contract_version,
+            first_seen_run_id, last_materialized_run_id
+        )
+        SELECT
+            exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
+            exit_trade_date, execution_status, execution_price, exited_weight,
+            blocking_reason_code, exit_reason_code, source_price_line, ?,
+            COALESCE(existing_first_seen_run_id, ?), ?
+        FROM trade_materialized_exit_execution_with_action
+        """,
+        [TRADE_CONTRACT_VERSION, run_id, run_id],
+    )
+
+
+def _stage_trade_work_queue(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            queue_id, portfolio_id, symbol, status, source_row_count,
+            last_reference_trade_date, source_fingerprint, claimed_at, finished_at
+        )
+        SELECT
+            CONCAT(?, ':', portfolio_id, ':', symbol),
+            portfolio_id,
+            symbol,
+            status,
+            source_row_count,
+            last_reference_trade_date,
+            source_fingerprint,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM trade_work_unit_actions
+        """,
+        [run_id],
+    )
+
+
+def _stage_trade_checkpoint(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    source_filter = _source_work_unit_filter(row_alias="checkpoint")
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            portfolio_id, symbol, last_reference_trade_date, last_source_fingerprint, last_run_id, updated_at
+        )
+        SELECT
+            portfolio_id, symbol, last_reference_trade_date, last_source_fingerprint, last_run_id, updated_at
+        FROM trade_checkpoint AS checkpoint
+        WHERE NOT {source_filter}
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            portfolio_id, symbol, last_reference_trade_date, last_source_fingerprint, last_run_id, updated_at
+        )
+        SELECT portfolio_id, symbol, last_reference_trade_date, source_fingerprint, ?, CURRENT_TIMESTAMP
+        FROM trade_source_work_unit_summary
+        """,
+        [run_id],
+    )
+
+
+def _stage_trade_run_order_intent(*, connection: duckdb.DuckDBPyConnection, stage_table: str, run_id: str) -> None:
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            run_id, order_intent_nk, intent_status, materialization_action, recorded_at
+        )
+        SELECT run_id, order_intent_nk, intent_status, materialization_action, recorded_at
+        FROM trade_run_order_intent
+        WHERE run_id != ?
+        """,
+        [run_id],
+    )
+    connection.execute(
+        f"""
+        INSERT INTO {stage_table} (
+            run_id, order_intent_nk, intent_status, materialization_action
+        )
+        SELECT ?, order_intent_nk, intent_status, materialization_action
+        FROM trade_materialized_intent_with_action
+        """,
+        [run_id],
+    )
+
+
+def _cutover_trade_target_tables(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    stage_tables: dict[str, str],
+    phase_observer: Callable[..., None] | None,
+    work_units_updated: int,
+) -> None:
+    backup_tables = {
+        table_name: _trade_backup_table_name(table_name=table_name, run_id=run_id)
+        for table_name in TRADE_CUTOVER_TARGET_TABLES
+    }
+    transaction_started = perf_counter()
+    if phase_observer is not None:
+        phase_observer(
+            "write_cutover_transaction_started",
+            elapsed_seconds=0.0,
+            row_count=len(TRADE_CUTOVER_TARGET_TABLES),
+            detail=f"work_units_updated={work_units_updated}",
+        )
+    try:
+        connection.execute("BEGIN TRANSACTION")
+        for index_name, _, _ in TRADE_SECONDARY_INDEXES:
+            connection.execute(f"DROP INDEX IF EXISTS {index_name}")
+        for table_name in TRADE_CUTOVER_TARGET_TABLES:
+            connection.execute(f"ALTER TABLE {table_name} RENAME TO {backup_tables[table_name]}")
+            connection.execute(f"ALTER TABLE {stage_tables[table_name]} RENAME TO {table_name}")
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_cutover_committed",
+        started_at=transaction_started,
+        table_name="trade_work_queue",
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_transaction_committed",
+        started_at=transaction_started,
+        table_name="trade_work_queue",
+        detail=f"work_units_updated={work_units_updated} cutover=1",
+    )
+    indexes_started = perf_counter()
+    _rebuild_trade_secondary_indexes(connection=connection)
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_indexes_rebuilt",
+        started_at=indexes_started,
+        table_name="trade_order_intent",
+        detail=f"index_count={len(TRADE_SECONDARY_INDEXES)}",
+    )
+    cleanup_started = perf_counter()
+    for table_name in TRADE_CUTOVER_TARGET_TABLES:
+        _drop_table_if_exists(connection=connection, table_name=backup_tables[table_name])
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_cutover_backups_dropped",
+        started_at=cleanup_started,
+        table_name="trade_work_queue",
+        detail=f"backup_count={len(backup_tables)}",
+    )
+
+
+def _rebuild_trade_secondary_indexes(*, connection: duckdb.DuckDBPyConnection) -> None:
+    for index_name, table_name, expression in TRADE_SECONDARY_INDEXES:
+        connection.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name}{expression}")
 
 
 def _delete_trade_targets_in_batches(

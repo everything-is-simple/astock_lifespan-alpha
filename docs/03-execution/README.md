@@ -223,3 +223,15 @@ Stage-five implementation defaults are frozen for engineering:
 - 当前 blocker 已移动到 `write_transaction_committed` 之前
 - `trade` 继续保持 `待修`
 - `system` 继续冻结，等待 `trade` 放行
+
+## Card 54 addendum
+
+- `54` trade commit cutover 已登记
+- 正式写入尾段已改为 staged target table replacement
+- 正式 run `trade-558802e7f7a4` 已 `completed`
+- 正式日志已出现 `write_cutover_committed` 与 `write_transaction_committed`
+- `trade_checkpoint.last_run_id` 已全量切到 `trade-558802e7f7a4`
+- `trade_position_leg / trade_carry_snapshot / trade_exit_execution` 已落正式表
+- 正式库无 staging / backup 残留表，secondary indexes 已恢复
+- `trade` 改为 `放行`
+- 下一活跃模块切到 `system`
