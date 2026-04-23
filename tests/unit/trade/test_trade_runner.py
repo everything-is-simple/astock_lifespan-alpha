@@ -8,6 +8,7 @@ import duckdb
 from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_plan_schema
 from astock_lifespan_alpha.trade import TradeRunSummary, run_trade_from_portfolio_plan
+import astock_lifespan_alpha.trade.runner as trade_runner_module
 from astock_lifespan_alpha.trade.runner import profile_trade_live_path
 from astock_lifespan_alpha.trade.schema import TRADE_TABLES, initialize_trade_schema
 from astock_lifespan_alpha.trade.source import load_trade_source_rows
@@ -283,6 +284,70 @@ def test_trade_runner_reuses_same_input_and_rematerializes_changed_work_unit(mon
 
     assert {"inserted", "reused", "rematerialized"}.issubset(actions)
     assert execution_weight == 0.05
+
+
+def test_trade_runner_batches_target_deletes_by_work_unit(monkeypatch, tmp_path, capsys):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    monkeypatch.setattr(trade_runner_module, "TRADE_DELETE_WORK_UNIT_BATCH_SIZE", 1)
+    market_path = workspace / "data" / "base" / "market_base.duckdb"
+    portfolio_plan_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
+    _write_market_base_day(
+        market_path,
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+            ("BBB", "2026-01-03T00:00:00", 20.0),
+            ("BBB", "2026-01-04T00:00:00", 21.1),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        portfolio_plan_path,
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:batch:1",
+                candidate_nk="candidate:batch:1",
+                symbol="AAA",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.10,
+                plan_status="admitted",
+            ),
+            _plan_row(
+                plan_snapshot_nk="plan:batch:2",
+                candidate_nk="candidate:batch:2",
+                symbol="BBB",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.10,
+                plan_status="admitted",
+            ),
+        ],
+    )
+
+    run_trade_from_portfolio_plan()
+    capsys.readouterr()
+    _update_admitted_weight(portfolio_plan_path, plan_snapshot_nk="plan:batch:2", admitted_weight=0.05)
+    summary = run_trade_from_portfolio_plan()
+    stderr = capsys.readouterr().err
+
+    assert summary.checkpoint_summary.work_units_updated == 1
+    assert "write_delete_trade_order_execution_batch" in stderr
+    assert "batch_index=2 batch_count=2" in stderr
+    assert "write_delete_trade_order_intent_done" in stderr
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"),
+        read_only=True,
+    ) as connection:
+        rows = connection.execute(
+            """
+            SELECT candidate_nk, execution_weight
+            FROM trade_order_intent
+            WHERE candidate_nk LIKE 'candidate:batch:%'
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+        execution_count = connection.execute("SELECT COUNT(*) FROM trade_order_execution").fetchone()[0]
+
+    assert rows == [("candidate:batch:1", 0.10), ("candidate:batch:2", 0.05)]
+    assert execution_count == 2
 
 
 def test_trade_runner_materializes_exit_and_carry_rows(monkeypatch, tmp_path):

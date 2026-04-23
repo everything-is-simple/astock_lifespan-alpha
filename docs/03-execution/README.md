@@ -213,3 +213,13 @@ Stage-five implementation defaults are frozen for engineering:
 - 当前 live blocker 已进一步收敛为 `write_targets_cleared` 之前的 target-table delete 路径
 - `trade` 继续保持 `待修`
 - `system` 继续冻结，等待 `trade` 放行
+
+## Card 53 addendum
+
+- `53` trade delete path unblock 已登记
+- target-table delete 已拆成表级与 batch 级阶段
+- 正式 run `trade-258bd7bafa7d` 已越过 `write_targets_cleared`
+- 正式 run 同时已越过 `write_output_tables_loaded` 与 `write_tracking_tables_loaded`
+- 当前 blocker 已移动到 `write_transaction_committed` 之前
+- `trade` 继续保持 `待修`
+- `system` 继续冻结，等待 `trade` 放行

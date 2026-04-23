@@ -25,6 +25,7 @@ from astock_lifespan_alpha.trade.schema import initialize_trade_schema
 
 
 DAY_TABLE_CANDIDATES = ("stock_daily_adjusted", "market_base_day", "bars_day", "price_bar_day", "market_day")
+TRADE_DELETE_WORK_UNIT_BATCH_SIZE = 250
 
 
 @dataclass(frozen=True)
@@ -1085,45 +1086,10 @@ def _materialize_trade_sql(
         try:
             connection.execute("BEGIN TRANSACTION")
             delete_started = perf_counter()
-            connection.execute(
-                """
-                DELETE FROM trade_order_execution AS execution
-                USING trade_source_work_unit_summary AS source
-                WHERE execution.portfolio_id = source.portfolio_id
-                    AND execution.symbol = source.symbol
-                """
-            )
-            connection.execute(
-                """
-                DELETE FROM trade_order_intent AS intent
-                USING trade_source_work_unit_summary AS source
-                WHERE intent.portfolio_id = source.portfolio_id
-                    AND intent.symbol = source.symbol
-                """
-            )
-            connection.execute(
-                """
-                DELETE FROM trade_position_leg AS leg
-                USING trade_source_work_unit_summary AS source
-                WHERE leg.portfolio_id = source.portfolio_id
-                    AND leg.symbol = source.symbol
-                """
-            )
-            connection.execute(
-                """
-                DELETE FROM trade_carry_snapshot AS carry
-                USING trade_source_work_unit_summary AS source
-                WHERE carry.portfolio_id = source.portfolio_id
-                    AND carry.symbol = source.symbol
-                """
-            )
-            connection.execute(
-                """
-                DELETE FROM trade_exit_execution AS exit_execution
-                USING trade_source_work_unit_summary AS source
-                WHERE exit_execution.portfolio_id = source.portfolio_id
-                    AND exit_execution.symbol = source.symbol
-                """
+            _delete_trade_targets_in_batches(
+                connection=connection,
+                phase_observer=phase_observer,
+                batch_size=TRADE_DELETE_WORK_UNIT_BATCH_SIZE,
             )
             _record_phase(
                 connection=connection,
@@ -1330,6 +1296,99 @@ def _materialize_trade_sql(
         work_units_updated,
         latest_reference_trade_date,
     )
+
+
+def _delete_trade_targets_in_batches(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    phase_observer: Callable[..., None] | None,
+    batch_size: int,
+) -> None:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE trade_delete_work_unit_batches AS
+        SELECT
+            portfolio_id,
+            symbol,
+            CAST(FLOOR((ROW_NUMBER() OVER (ORDER BY portfolio_id, symbol) - 1) / ?) + 1 AS INTEGER) AS batch_index
+        FROM trade_source_work_unit_summary
+        """,
+        [batch_size],
+    )
+    batch_count = int(
+        connection.execute("SELECT COALESCE(MAX(batch_index), 0) FROM trade_delete_work_unit_batches").fetchone()[0]
+        or 0
+    )
+    work_unit_count = _table_row_count(connection=connection, table_name="trade_delete_work_unit_batches")
+    if phase_observer is not None:
+        phase_observer(
+            "write_delete_batches_ready",
+            elapsed_seconds=0.0,
+            row_count=batch_count,
+            detail=f"batch_size={batch_size} work_units={work_unit_count}",
+        )
+    delete_targets = [
+        ("trade_carry_snapshot", "carry"),
+        ("trade_exit_execution", "exit_execution"),
+        ("trade_position_leg", "leg"),
+        ("trade_order_execution", "execution"),
+        ("trade_order_intent", "intent"),
+    ]
+    for table_name, alias in delete_targets:
+        table_started = perf_counter()
+        phase_prefix = f"write_delete_{table_name}"
+        if phase_observer is not None:
+            phase_observer(
+                f"{phase_prefix}_started",
+                elapsed_seconds=0.0,
+                row_count=batch_count,
+                detail=f"batch_size={batch_size}",
+            )
+        for batch_index in range(1, batch_count + 1):
+            batch_work_units = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM trade_delete_work_unit_batches WHERE batch_index = ?",
+                    [batch_index],
+                ).fetchone()[0]
+                or 0
+            )
+            batch_started = perf_counter()
+            if phase_observer is not None:
+                phase_observer(
+                    f"{phase_prefix}_batch",
+                    elapsed_seconds=0.0,
+                    row_count=batch_work_units,
+                    detail=f"batch_index={batch_index} batch_count={batch_count}",
+                )
+            connection.execute(
+                f"""
+                DELETE FROM {table_name} AS {alias}
+                USING (
+                    SELECT portfolio_id, symbol
+                    FROM trade_delete_work_unit_batches
+                    WHERE batch_index = ?
+                ) AS source
+                WHERE {alias}.portfolio_id = source.portfolio_id
+                    AND {alias}.symbol = source.symbol
+                """,
+                [batch_index],
+            )
+            if phase_observer is not None:
+                phase_observer(
+                    f"{phase_prefix}_batch_done",
+                    elapsed_seconds=perf_counter() - batch_started,
+                    row_count=batch_work_units,
+                    detail=f"batch_index={batch_index} batch_count={batch_count}",
+                )
+        if phase_observer is not None:
+            phase_observer(
+                f"{phase_prefix}_done",
+                elapsed_seconds=perf_counter() - table_started,
+                row_count=batch_count,
+                detail=f"batch_size={batch_size}",
+            )
 
 
 def _classify_trade_actions(

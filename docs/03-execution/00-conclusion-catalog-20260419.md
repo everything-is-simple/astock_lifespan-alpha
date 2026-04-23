@@ -312,3 +312,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/52-trade-live-slow-path-diagnosis-and-unblock-conclusion-20260423.md`
 - 裁决：`已记录，trade 待修`
 - 说明：Card 52 已补齐 `trade` phase-level 可观测性与只读 profile，并把 live slow-path 正式收敛到写事务 delete 路径；最新正式 rerun `trade-dbb7397cbd43` 已推进到 `write_transaction_started`，但在 `write_targets_cleared` 之前连续两个观察窗无 `CPU / stderr / db mtime` 进展，因此 `trade` 继续保持 `待修`，`system` 继续冻结。
+
+### `53` trade delete path unblock
+
+- 结论文档：`docs/03-execution/53-trade-delete-path-unblock-conclusion-20260423.md`
+- 裁决：`已记录，trade 待修`
+- 说明：Card 53 已将 target-table delete 拆成表级与 batch 级阶段；正式 run `trade-258bd7bafa7d` 已越过 `write_targets_cleared / write_output_tables_loaded / write_tracking_tables_loaded`，证明 delete path 已解除，但 run 在 `write_transaction_committed` 前无进展并已标记为 `interrupted`，因此 `trade` 继续保持 `待修`，`system` 继续冻结。
