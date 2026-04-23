@@ -202,3 +202,14 @@ Stage-five implementation defaults are frozen for engineering:
 - 褰撳墠 `trade = 寰呬慨`
 - 鏈€鏂?live run `trade-6f780ccc1005` 宸叉爣璁颁负 `interrupted`
 - `system` 缁х画鍐荤粨锛岀瓑寰?trade 鏀捐鍚庡啀杩涘叆 live freeze gate
+
+## Card 52 addendum
+
+- `52` trade live slow-path diagnosis and unblock 已登记
+- 当前唯一活跃模块继续保持为 `trade`
+- 只读 `profile_trade_live_path` 已能完整返回正式体量 phase timings
+- 当前正式主瓶颈已收敛到 `intent_materialized / action_tables_ready`
+- 正式 writer 已能推进到 `write_transaction_started`
+- 当前 live blocker 已进一步收敛为 `write_targets_cleared` 之前的 target-table delete 路径
+- `trade` 继续保持 `待修`
+- `system` 继续冻结，等待 `trade` 放行

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import ctypes
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from time import perf_counter
+from typing import Callable
 from uuid import uuid4
 
 import duckdb
@@ -29,6 +33,136 @@ class _TradeSourceMetadata:
     execution_price_source_path: Path | None
     row_count: int
     work_unit_count: int
+
+
+@dataclass(frozen=True)
+class _TradePhaseMetric:
+    phase: str
+    elapsed_seconds: float
+    row_count: int | None = None
+    rss_mb: float | None = None
+    detail: str | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "phase": self.phase,
+            "elapsed_seconds": round(self.elapsed_seconds, 6),
+        }
+        if self.row_count is not None:
+            payload["row_count"] = self.row_count
+        if self.rss_mb is not None:
+            payload["rss_mb"] = round(self.rss_mb, 2)
+        if self.detail is not None:
+            payload["detail"] = self.detail
+        return payload
+
+
+class _TradePhaseRecorder:
+    def __init__(
+        self,
+        *,
+        connection: duckdb.DuckDBPyConnection | None = None,
+        run_id: str | None = None,
+        emit_stderr: bool = False,
+    ) -> None:
+        self._connection = connection
+        self._run_id = run_id
+        self._emit_stderr = emit_stderr
+        self.metrics: list[_TradePhaseMetric] = []
+        self.latest_message: str | None = None
+
+    def record(
+        self,
+        phase: str,
+        *,
+        elapsed_seconds: float,
+        row_count: int | None = None,
+        detail: str | None = None,
+    ) -> None:
+        metric = _TradePhaseMetric(
+            phase=phase,
+            elapsed_seconds=elapsed_seconds,
+            row_count=row_count,
+            rss_mb=_working_set_mb(),
+            detail=detail,
+        )
+        self.metrics.append(metric)
+        message = _format_trade_phase_message(metric)
+        self.latest_message = message
+        if self._connection is not None and self._run_id is not None:
+            self._connection.execute(
+                "UPDATE trade_run SET message = ? WHERE run_id = ?",
+                [message, self._run_id],
+            )
+        if self._emit_stderr:
+            print(message, file=sys.stderr, flush=True)
+
+
+class _ProcessMemoryCounters(ctypes.Structure):
+    _fields_ = [
+        ("cb", ctypes.c_ulong),
+        ("PageFaultCount", ctypes.c_ulong),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
+def _working_set_mb() -> float | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+        if not ctypes.windll.psapi.GetProcessMemoryInfo(
+            ctypes.windll.kernel32.GetCurrentProcess(),
+            ctypes.byref(counters),
+            counters.cb,
+        ):
+            return None
+        return counters.WorkingSetSize / (1024 * 1024)
+    except Exception:
+        return None
+
+
+def _format_trade_phase_message(metric: _TradePhaseMetric) -> str:
+    parts = [metric.phase, f"elapsed_seconds={metric.elapsed_seconds:.6f}"]
+    if metric.row_count is not None:
+        parts.append(f"rows={metric.row_count}")
+    if metric.rss_mb is not None:
+        parts.append(f"rss_mb={metric.rss_mb:.2f}")
+    if metric.detail:
+        parts.append(metric.detail)
+    return "trade phase " + " ".join(parts)
+
+
+def _table_row_count(*, connection: duckdb.DuckDBPyConnection, table_name: str) -> int:
+    return int(connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] or 0)
+
+
+def _record_phase(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    phase_observer: Callable[..., None] | None,
+    phase: str,
+    started_at: float,
+    table_name: str | None = None,
+    detail: str | None = None,
+) -> int | None:
+    row_count = _table_row_count(connection=connection, table_name=table_name) if table_name is not None else None
+    if phase_observer is not None:
+        phase_observer(
+            phase,
+            elapsed_seconds=perf_counter() - started_at,
+            row_count=row_count,
+            detail=detail,
+        )
+    return row_count
 
 
 def run_trade_from_portfolio_plan(
@@ -83,6 +217,13 @@ def run_trade_from_portfolio_plan(
                 source.work_unit_count,
             ],
         )
+        phase_recorder = _TradePhaseRecorder(connection=connection, run_id=run_id, emit_stderr=True)
+        phase_recorder.record(
+            "source_attached",
+            elapsed_seconds=0.0,
+            row_count=source.row_count,
+            detail=f"work_units={source.work_unit_count}",
+        )
         connection.execute("DELETE FROM trade_work_queue")
 
         if source.row_count == 0:
@@ -91,7 +232,9 @@ def run_trade_from_portfolio_plan(
             counts, work_units_updated, latest_reference_trade_date = _materialize_trade_sql(
                 connection=connection,
                 run_id=run_id,
+                phase_observer=phase_recorder.record,
             )
+            message = phase_recorder.latest_message or message
 
         connection.execute(
             """
@@ -300,7 +443,12 @@ def _materialize_trade_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
+    phase_observer: Callable[..., None] | None = None,
+    allow_fast_path: bool = True,
+    write_outputs: bool = True,
+    existing_catalog: str | None = None,
 ) -> tuple[dict[str, int], int, date | None]:
+    phase_started = perf_counter()
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE trade_source_work_unit_rows AS
@@ -308,19 +456,34 @@ def _materialize_trade_sql(
             portfolio_id,
             symbol,
             reference_trade_date,
-            planned_entry_trade_date,
-            candidate_nk,
-            plan_snapshot_nk,
-            md5(
-                CONCAT(
-                    plan_snapshot_nk, '|', candidate_nk, '|',
-                    COALESCE(CAST(reference_trade_date AS VARCHAR), 'None'), '|',
-                    COALESCE(CAST(planned_entry_trade_date AS VARCHAR), 'None'), '|',
-                    COALESCE(CAST(scheduled_exit_trade_date AS VARCHAR), 'None'), '|',
-                    position_action_decision, '|', requested_weight, '|', admitted_weight, '|', trimmed_weight,
-                    '|', plan_status, '|', COALESCE(blocking_reason_code, ''), '|', COALESCE(planned_exit_reason_code, '')
-                )
-            ) AS row_fingerprint
+            hash(
+                plan_snapshot_nk,
+                candidate_nk,
+                reference_trade_date,
+                planned_entry_trade_date,
+                scheduled_exit_trade_date,
+                position_action_decision,
+                requested_weight,
+                admitted_weight,
+                trimmed_weight,
+                plan_status,
+                COALESCE(blocking_reason_code, ''),
+                COALESCE(planned_exit_reason_code, '')
+            ) AS row_hash_primary,
+            hash(
+                candidate_nk,
+                plan_snapshot_nk,
+                planned_entry_trade_date,
+                scheduled_exit_trade_date,
+                requested_weight,
+                admitted_weight,
+                trimmed_weight,
+                plan_status,
+                COALESCE(blocking_reason_code, ''),
+                COALESCE(planned_exit_reason_code, ''),
+                position_action_decision,
+                reference_trade_date
+            ) AS row_hash_secondary
         FROM trade_plan_source_rows
         """
     )
@@ -333,113 +496,353 @@ def _materialize_trade_sql(
             COUNT(*) AS source_row_count,
             MAX(reference_trade_date) AS last_reference_trade_date,
             md5(
-                string_agg(
-                    row_fingerprint,
-                    '||'
-                    ORDER BY planned_entry_trade_date, candidate_nk, plan_snapshot_nk
+                CONCAT(
+                    CAST(COUNT(*) AS VARCHAR), '|',
+                    CAST(SUM(CAST(row_hash_primary AS HUGEINT)) AS VARCHAR), '|',
+                    CAST(SUM(CAST(row_hash_secondary AS HUGEINT)) AS VARCHAR), '|',
+                    CAST(MIN(row_hash_primary) AS VARCHAR), '|',
+                    CAST(MAX(row_hash_primary) AS VARCHAR), '|',
+                    CAST(MIN(row_hash_secondary) AS VARCHAR), '|',
+                    CAST(MAX(row_hash_secondary) AS VARCHAR)
                 )
             ) AS source_fingerprint
         FROM trade_source_work_unit_rows
         GROUP BY portfolio_id, symbol
         """
     )
-    if _trade_checkpoint_fast_path_available(connection=connection):
-        return _record_reused_trade_sql(connection=connection, run_id=run_id)
+    work_unit_count = _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="work_unit_summary_ready",
+        started_at=phase_started,
+        table_name="trade_source_work_unit_summary",
+        detail=f"source_rows={_table_row_count(connection=connection, table_name='trade_source_work_unit_rows')}",
+    )
+    if allow_fast_path and _trade_checkpoint_fast_path_available(connection=connection):
+        return _record_reused_trade_sql(
+            connection=connection,
+            run_id=run_id,
+            phase_observer=phase_observer,
+            work_unit_count=work_unit_count or 0,
+        )
 
+    phase_started = perf_counter()
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE trade_direct_blocked_source AS
+        SELECT
+            plan.*,
+            CASE
+                WHEN plan.plan_status = 'blocked' THEN COALESCE(plan.blocking_reason_code, 'plan_blocked')
+                WHEN plan.plan_status NOT IN ('admitted', 'trimmed') THEN COALESCE(plan.blocking_reason_code, 'unsupported_plan_status')
+                WHEN plan.position_action_decision != 'open' THEN 'unsupported_position_action'
+                WHEN plan.admitted_weight <= 0 THEN 'invalid_admitted_weight'
+            END AS trade_blocking_reason_code
+        FROM trade_plan_source_rows AS plan
+        WHERE plan.plan_status = 'blocked'
+            OR plan.plan_status NOT IN ('admitted', 'trimmed')
+            OR plan.position_action_decision != 'open'
+            OR plan.admitted_weight <= 0
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE trade_price_candidate_source AS
+        SELECT plan.*
+        FROM trade_plan_source_rows AS plan
+        WHERE plan.plan_status IN ('admitted', 'trimmed')
+            AND plan.position_action_decision = 'open'
+            AND plan.admitted_weight > 0
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE trade_direct_blocked_fallback_trade_date_lookup AS
+        SELECT
+            key_rows.symbol,
+            key_rows.reference_trade_date,
+            fallback_price.trade_date AS effective_planned_trade_date
+        FROM (
+            SELECT DISTINCT symbol, reference_trade_date
+            FROM trade_direct_blocked_source
+            WHERE planned_entry_trade_date IS NULL
+        ) AS key_rows
+        ASOF LEFT JOIN trade_execution_price_source AS fallback_price
+            ON fallback_price.symbol = key_rows.symbol
+            AND key_rows.reference_trade_date < fallback_price.trade_date
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE trade_candidate_explicit_price_lookup AS
+        SELECT
+            key_rows.symbol,
+            key_rows.planned_entry_trade_date,
+            explicit_price.trade_date AS execution_trade_date,
+            explicit_price.open_price AS execution_price
+        FROM (
+            SELECT DISTINCT symbol, planned_entry_trade_date
+            FROM trade_price_candidate_source
+            WHERE planned_entry_trade_date IS NOT NULL
+        ) AS key_rows
+        LEFT JOIN trade_execution_price_source AS explicit_price
+            ON explicit_price.symbol = key_rows.symbol
+            AND explicit_price.trade_date = key_rows.planned_entry_trade_date
+        """
+    )
+    connection.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE trade_candidate_fallback_price_lookup AS
+        SELECT
+            key_rows.symbol,
+            key_rows.reference_trade_date,
+            fallback_price.trade_date AS execution_trade_date,
+            fallback_price.open_price AS execution_price
+        FROM (
+            SELECT DISTINCT symbol, reference_trade_date
+            FROM trade_price_candidate_source
+            WHERE planned_entry_trade_date IS NULL
+        ) AS key_rows
+        ASOF LEFT JOIN trade_execution_price_source AS fallback_price
+            ON fallback_price.symbol = key_rows.symbol
+            AND key_rows.reference_trade_date < fallback_price.trade_date
+        """
+    )
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE trade_materialized_intent AS
-        WITH planned AS (
+        WITH blocked_intent_rows AS (
             SELECT
-                plan.*,
-                COALESCE(plan.planned_entry_trade_date, fallback_price.trade_date) AS effective_planned_trade_date,
+                CONCAT(
+                    blocked.portfolio_id,
+                    ':',
+                    blocked.candidate_nk,
+                    ':entry:',
+                    COALESCE(
+                        CAST(
+                            COALESCE(
+                                blocked.planned_entry_trade_date,
+                                blocked_fallback.effective_planned_trade_date
+                            ) AS VARCHAR
+                        ),
+                        'no_execution_date'
+                    ),
+                    ':',
+                    ?
+                ) AS order_intent_nk,
+                blocked.plan_snapshot_nk,
+                blocked.candidate_nk,
+                blocked.portfolio_id,
+                blocked.symbol,
+                blocked.reference_trade_date,
+                COALESCE(
+                    blocked.planned_entry_trade_date,
+                    blocked_fallback.effective_planned_trade_date
+                ) AS planned_trade_date,
+                blocked.position_action_decision,
+                'blocked' AS intent_status,
+                blocked.requested_weight,
+                blocked.admitted_weight,
+                0.0 AS execution_weight,
+                blocked.trade_blocking_reason_code AS blocking_reason_code,
+                blocked.scheduled_exit_trade_date,
+                blocked.planned_exit_reason_code
+            FROM trade_direct_blocked_source AS blocked
+            LEFT JOIN trade_direct_blocked_fallback_trade_date_lookup AS blocked_fallback
+                ON blocked_fallback.symbol = blocked.symbol
+                AND blocked_fallback.reference_trade_date = blocked.reference_trade_date
+        ),
+        priced_candidates AS (
+            SELECT
+                candidate.*,
+                COALESCE(candidate.planned_entry_trade_date, fallback_lookup.execution_trade_date) AS effective_planned_trade_date,
                 CASE
-                    WHEN plan.planned_entry_trade_date IS NOT NULL THEN explicit_price.open_price
-                    ELSE fallback_price.open_price
+                    WHEN candidate.planned_entry_trade_date IS NOT NULL THEN explicit_lookup.execution_price
+                    ELSE fallback_lookup.execution_price
                 END AS execution_price,
                 CASE
-                    WHEN plan.planned_entry_trade_date IS NOT NULL THEN explicit_price.trade_date
-                    ELSE fallback_price.trade_date
+                    WHEN candidate.planned_entry_trade_date IS NOT NULL THEN explicit_lookup.execution_trade_date
+                    ELSE fallback_lookup.execution_trade_date
                 END AS execution_trade_date
-            FROM trade_plan_source_rows AS plan
-            LEFT JOIN trade_execution_price_source AS explicit_price
-                ON explicit_price.symbol = plan.symbol
-                AND explicit_price.trade_date = plan.planned_entry_trade_date
-            ASOF LEFT JOIN trade_execution_price_source AS fallback_price
-                ON fallback_price.symbol = plan.symbol
-                AND plan.reference_trade_date < fallback_price.trade_date
+            FROM trade_price_candidate_source AS candidate
+            LEFT JOIN trade_candidate_explicit_price_lookup AS explicit_lookup
+                ON explicit_lookup.symbol = candidate.symbol
+                AND explicit_lookup.planned_entry_trade_date = candidate.planned_entry_trade_date
+            LEFT JOIN trade_candidate_fallback_price_lookup AS fallback_lookup
+                ON fallback_lookup.symbol = candidate.symbol
+                AND fallback_lookup.reference_trade_date = candidate.reference_trade_date
         ),
-        reasoned AS (
+        candidate_intent_rows AS (
             SELECT
-                *,
+                CONCAT(
+                    priced.portfolio_id,
+                    ':',
+                    priced.candidate_nk,
+                    ':entry:',
+                    COALESCE(CAST(priced.effective_planned_trade_date AS VARCHAR), 'no_execution_date'),
+                    ':',
+                    ?
+                ) AS order_intent_nk,
+                priced.plan_snapshot_nk,
+                priced.candidate_nk,
+                priced.portfolio_id,
+                priced.symbol,
+                priced.reference_trade_date,
+                priced.effective_planned_trade_date AS planned_trade_date,
+                priced.position_action_decision,
                 CASE
-                    WHEN plan_status = 'blocked' THEN COALESCE(blocking_reason_code, 'plan_blocked')
-                    WHEN plan_status NOT IN ('admitted', 'trimmed') THEN COALESCE(blocking_reason_code, 'unsupported_plan_status')
-                    WHEN position_action_decision != 'open' THEN 'unsupported_position_action'
-                    WHEN admitted_weight <= 0 THEN 'invalid_admitted_weight'
-                    WHEN effective_planned_trade_date IS NULL THEN 'missing_next_execution_trade_date'
-                    WHEN execution_trade_date IS NULL THEN 'missing_next_execution_trade_date'
-                    WHEN execution_price IS NULL THEN 'missing_execution_open_price'
+                    WHEN priced.effective_planned_trade_date IS NULL THEN 'blocked'
+                    WHEN priced.execution_trade_date IS NULL THEN 'blocked'
+                    WHEN priced.execution_price IS NULL THEN 'blocked'
+                    ELSE 'planned'
+                END AS intent_status,
+                priced.requested_weight,
+                priced.admitted_weight,
+                CASE
+                    WHEN priced.effective_planned_trade_date IS NULL
+                        OR priced.execution_trade_date IS NULL
+                        OR priced.execution_price IS NULL
+                        THEN 0.0
+                    ELSE ROUND(priced.admitted_weight, 8)
+                END AS execution_weight,
+                CASE
+                    WHEN priced.effective_planned_trade_date IS NULL THEN 'missing_next_execution_trade_date'
+                    WHEN priced.execution_trade_date IS NULL THEN 'missing_next_execution_trade_date'
+                    WHEN priced.execution_price IS NULL THEN 'missing_execution_open_price'
                     ELSE NULL
-                END AS trade_blocking_reason_code
-            FROM planned
+                END AS blocking_reason_code,
+                priced.scheduled_exit_trade_date,
+                priced.planned_exit_reason_code
+            FROM priced_candidates AS priced
         )
-        SELECT
-            CONCAT(
-                portfolio_id,
-                ':',
-                candidate_nk,
-                ':entry:',
-                COALESCE(CAST(effective_planned_trade_date AS VARCHAR), 'no_execution_date'),
-                ':',
-                ?
-            ) AS order_intent_nk,
+        SELECT * FROM blocked_intent_rows
+        UNION ALL
+        SELECT * FROM candidate_intent_rows
+        """,
+        [TRADE_CONTRACT_VERSION, TRADE_CONTRACT_VERSION],
+    )
+    connection.execute(
+        """
+        ALTER TABLE trade_materialized_intent
+        ADD COLUMN compare_signature UBIGINT
+        """
+    )
+    connection.execute(
+        """
+        UPDATE trade_materialized_intent
+        SET compare_signature = hash(
             plan_snapshot_nk,
             candidate_nk,
             portfolio_id,
             symbol,
             reference_trade_date,
-            effective_planned_trade_date AS planned_trade_date,
+            planned_trade_date,
             position_action_decision,
-            CASE WHEN trade_blocking_reason_code IS NULL THEN 'planned' ELSE 'blocked' END AS intent_status,
+            intent_status,
             requested_weight,
             admitted_weight,
-            CASE WHEN trade_blocking_reason_code IS NULL THEN ROUND(admitted_weight, 8) ELSE 0.0 END AS execution_weight,
-            trade_blocking_reason_code AS blocking_reason_code,
-            scheduled_exit_trade_date,
-            planned_exit_reason_code
-        FROM reasoned
-        """,
-        [TRADE_CONTRACT_VERSION],
+            execution_weight,
+            blocking_reason_code
+        )
+        """
     )
+    blocked_row_count = _table_row_count(connection=connection, table_name="trade_direct_blocked_source")
+    candidate_row_count = _table_row_count(connection=connection, table_name="trade_price_candidate_source")
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="intent_materialized",
+        started_at=phase_started,
+        table_name="trade_materialized_intent",
+        detail=f"direct_blocked_rows={blocked_row_count} candidate_rows={candidate_row_count}",
+    )
+
+    phase_started = perf_counter()
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE trade_materialized_execution AS
-        SELECT
-            CONCAT(
-                order_intent_nk,
-                ':',
-                COALESCE(CAST(planned_trade_date AS VARCHAR), 'no_execution_date'),
-                ':',
-                CASE WHEN blocking_reason_code IS NULL THEN 'filled' ELSE 'rejected' END
-            ) AS order_execution_nk,
-            intent.order_intent_nk,
-            intent.candidate_nk,
-            intent.portfolio_id,
-            intent.symbol,
-            CASE WHEN intent.blocking_reason_code IS NULL THEN 'filled' ELSE 'rejected' END AS execution_status,
-            intent.planned_trade_date AS execution_trade_date,
-            price.open_price AS execution_price,
-            CASE WHEN intent.blocking_reason_code IS NULL THEN ROUND(intent.execution_weight, 8) ELSE 0.0 END AS executed_weight,
-            intent.blocking_reason_code,
-            ? AS source_price_line
-        FROM trade_materialized_intent AS intent
-        LEFT JOIN trade_execution_price_source AS price
-            ON price.symbol = intent.symbol
-            AND price.trade_date = intent.planned_trade_date
+        WITH blocked_execution_rows AS (
+            SELECT
+                CONCAT(
+                    order_intent_nk,
+                    ':',
+                    COALESCE(CAST(planned_trade_date AS VARCHAR), 'no_execution_date'),
+                    ':rejected'
+                ) AS order_execution_nk,
+                intent.order_intent_nk,
+                intent.candidate_nk,
+                intent.portfolio_id,
+                intent.symbol,
+                'rejected' AS execution_status,
+                intent.planned_trade_date AS execution_trade_date,
+                CAST(NULL AS DOUBLE) AS execution_price,
+                0.0 AS executed_weight,
+                intent.blocking_reason_code,
+                ? AS source_price_line
+            FROM trade_materialized_intent AS intent
+            WHERE intent.blocking_reason_code IS NOT NULL
+        ),
+        actionable_execution_rows AS (
+            SELECT
+                CONCAT(
+                    order_intent_nk,
+                    ':',
+                    COALESCE(CAST(planned_trade_date AS VARCHAR), 'no_execution_date'),
+                    ':filled'
+                ) AS order_execution_nk,
+                intent.order_intent_nk,
+                intent.candidate_nk,
+                intent.portfolio_id,
+                intent.symbol,
+                'filled' AS execution_status,
+                intent.planned_trade_date AS execution_trade_date,
+                price.open_price AS execution_price,
+                ROUND(intent.execution_weight, 8) AS executed_weight,
+                intent.blocking_reason_code,
+                ? AS source_price_line
+            FROM trade_materialized_intent AS intent
+            LEFT JOIN trade_execution_price_source AS price
+                ON price.symbol = intent.symbol
+                AND price.trade_date = intent.planned_trade_date
+            WHERE intent.blocking_reason_code IS NULL
+        )
+        SELECT * FROM blocked_execution_rows
+        UNION ALL
+        SELECT * FROM actionable_execution_rows
         """,
-        [EXECUTION_PRICE_LINE],
+        [EXECUTION_PRICE_LINE, EXECUTION_PRICE_LINE],
     )
+    connection.execute(
+        """
+        ALTER TABLE trade_materialized_execution
+        ADD COLUMN compare_signature UBIGINT
+        """
+    )
+    connection.execute(
+        """
+        UPDATE trade_materialized_execution
+        SET compare_signature = hash(
+            order_intent_nk,
+            portfolio_id,
+            symbol,
+            execution_status,
+            execution_trade_date,
+            execution_price,
+            executed_weight,
+            blocking_reason_code,
+            source_price_line
+        )
+        """
+    )
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="execution_materialized",
+        started_at=phase_started,
+        table_name="trade_materialized_execution",
+    )
+
+    phase_started = perf_counter()
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE trade_materialized_exit_execution AS
@@ -489,6 +892,39 @@ def _materialize_trade_sql(
     )
     connection.execute(
         """
+        ALTER TABLE trade_materialized_exit_execution
+        ADD COLUMN compare_signature UBIGINT
+        """
+    )
+    connection.execute(
+        """
+        UPDATE trade_materialized_exit_execution
+        SET compare_signature = hash(
+            position_leg_nk,
+            candidate_nk,
+            portfolio_id,
+            symbol,
+            exit_trade_date,
+            execution_status,
+            execution_price,
+            exited_weight,
+            blocking_reason_code,
+            exit_reason_code,
+            source_price_line
+        )
+        """
+    )
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="exit_materialized",
+        started_at=phase_started,
+        table_name="trade_materialized_exit_execution",
+    )
+
+    phase_started = perf_counter()
+    connection.execute(
+        """
         CREATE OR REPLACE TEMP TABLE trade_materialized_position_leg AS
         SELECT
             CONCAT(intent.portfolio_id, ':', intent.candidate_nk, ':leg') AS position_leg_nk,
@@ -526,6 +962,42 @@ def _materialize_trade_sql(
     )
     connection.execute(
         """
+        ALTER TABLE trade_materialized_position_leg
+        ADD COLUMN compare_signature UBIGINT
+        """
+    )
+    connection.execute(
+        """
+        UPDATE trade_materialized_position_leg
+        SET compare_signature = hash(
+            candidate_nk,
+            order_intent_nk,
+            portfolio_id,
+            symbol,
+            entry_reference_trade_date,
+            entry_trade_date,
+            entry_execution_price,
+            position_weight,
+            scheduled_exit_trade_date,
+            position_state,
+            exit_execution_nk,
+            exit_trade_date,
+            exit_execution_price,
+            active_weight
+        )
+        """
+    )
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="position_leg_materialized",
+        started_at=phase_started,
+        table_name="trade_materialized_position_leg",
+    )
+
+    phase_started = perf_counter()
+    connection.execute(
+        """
         CREATE OR REPLACE TEMP TABLE trade_materialized_carry_snapshot AS
         SELECT
             CONCAT(position_leg_nk, ':open') AS carry_snapshot_nk,
@@ -552,7 +1024,35 @@ def _materialize_trade_sql(
         WHERE scheduled_exit_trade_date IS NOT NULL
         """
     )
-    _classify_trade_actions(connection=connection, run_id=run_id)
+    connection.execute(
+        """
+        ALTER TABLE trade_materialized_carry_snapshot
+        ADD COLUMN compare_signature UBIGINT
+        """
+    )
+    connection.execute(
+        """
+        UPDATE trade_materialized_carry_snapshot
+        SET compare_signature = hash(
+            position_leg_nk,
+            portfolio_id,
+            symbol,
+            as_of_trade_date,
+            carry_status,
+            carried_weight
+        )
+        """
+    )
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="carry_materialized",
+        started_at=phase_started,
+        table_name="trade_materialized_carry_snapshot",
+    )
+
+    phase_started = perf_counter()
+    _classify_trade_actions(connection=connection, run_id=run_id, existing_catalog=existing_catalog)
 
     intent_counts = _action_counts(connection=connection, table_name="trade_materialized_intent_with_action")
     execution_counts = _action_counts(connection=connection, table_name="trade_materialized_execution_with_action")
@@ -565,193 +1065,250 @@ def _materialize_trade_sql(
     latest_reference_trade_date = connection.execute(
         "SELECT MAX(last_reference_trade_date) FROM trade_source_work_unit_summary"
     ).fetchone()[0]
-    try:
-        connection.execute("BEGIN TRANSACTION")
-        connection.execute(
-            """
-            DELETE FROM trade_order_execution
-            WHERE portfolio_id IN (SELECT portfolio_id FROM trade_source_work_unit_summary)
-                AND symbol IN (SELECT symbol FROM trade_source_work_unit_summary)
-            """
-        )
-        connection.execute(
-            """
-            DELETE FROM trade_order_intent
-            WHERE portfolio_id IN (SELECT portfolio_id FROM trade_source_work_unit_summary)
-                AND symbol IN (SELECT symbol FROM trade_source_work_unit_summary)
-            """
-        )
-        connection.execute(
-            """
-            DELETE FROM trade_position_leg
-            WHERE portfolio_id IN (SELECT portfolio_id FROM trade_source_work_unit_summary)
-                AND symbol IN (SELECT symbol FROM trade_source_work_unit_summary)
-            """
-        )
-        connection.execute(
-            """
-            DELETE FROM trade_carry_snapshot
-            WHERE portfolio_id IN (SELECT portfolio_id FROM trade_source_work_unit_summary)
-                AND symbol IN (SELECT symbol FROM trade_source_work_unit_summary)
-            """
-        )
-        connection.execute(
-            """
-            DELETE FROM trade_exit_execution
-            WHERE portfolio_id IN (SELECT portfolio_id FROM trade_source_work_unit_summary)
-                AND symbol IN (SELECT symbol FROM trade_source_work_unit_summary)
-            """
-        )
-        connection.execute(
-            """
-            INSERT INTO trade_order_intent (
-                order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
-                reference_trade_date, planned_trade_date, position_action_decision, intent_status,
-                requested_weight, admitted_weight, execution_weight, blocking_reason_code,
-                trade_contract_version, first_seen_run_id, last_materialized_run_id
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="action_tables_ready",
+        started_at=phase_started,
+        table_name="trade_work_unit_actions",
+        detail=f"work_units_updated={work_units_updated}",
+    )
+    if write_outputs:
+        if phase_observer is not None:
+            phase_observer(
+                "write_transaction_started",
+                elapsed_seconds=0.0,
+                row_count=work_unit_count,
+                detail=f"work_units_updated={work_units_updated}",
             )
-            SELECT
-                order_intent_nk,
-                plan_snapshot_nk,
-                candidate_nk,
-                portfolio_id,
-                symbol,
-                reference_trade_date,
-                planned_trade_date,
-                position_action_decision,
-                intent_status,
-                requested_weight,
-                admitted_weight,
-                execution_weight,
-                blocking_reason_code,
-                ?,
-                COALESCE(existing_first_seen_run_id, ?),
-                ?
-            FROM trade_materialized_intent_with_action
-            """,
-            [TRADE_CONTRACT_VERSION, run_id, run_id],
-        )
-        connection.execute(
-            """
-            INSERT INTO trade_order_execution (
-                order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
-                execution_trade_date, execution_price, executed_weight, blocking_reason_code,
-                source_price_line, trade_contract_version, first_seen_run_id, last_materialized_run_id
+        phase_started = perf_counter()
+        try:
+            connection.execute("BEGIN TRANSACTION")
+            delete_started = perf_counter()
+            connection.execute(
+                """
+                DELETE FROM trade_order_execution AS execution
+                USING trade_source_work_unit_summary AS source
+                WHERE execution.portfolio_id = source.portfolio_id
+                    AND execution.symbol = source.symbol
+                """
             )
-            SELECT
-                order_execution_nk,
-                order_intent_nk,
-                portfolio_id,
-                symbol,
-                execution_status,
-                execution_trade_date,
-                execution_price,
-                executed_weight,
-                blocking_reason_code,
-                source_price_line,
-                ?,
-                COALESCE(existing_first_seen_run_id, ?),
-                ?
-            FROM trade_materialized_execution_with_action
-            """,
-            [TRADE_CONTRACT_VERSION, run_id, run_id],
-        )
-        connection.execute(
-            """
-            INSERT INTO trade_position_leg (
-                position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
-                entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
-                scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
-                exit_execution_price, active_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+            connection.execute(
+                """
+                DELETE FROM trade_order_intent AS intent
+                USING trade_source_work_unit_summary AS source
+                WHERE intent.portfolio_id = source.portfolio_id
+                    AND intent.symbol = source.symbol
+                """
             )
-            SELECT
-                position_leg_nk,
-                candidate_nk,
-                order_intent_nk,
-                portfolio_id,
-                symbol,
-                entry_reference_trade_date,
-                entry_trade_date,
-                entry_execution_price,
-                position_weight,
-                scheduled_exit_trade_date,
-                position_state,
-                exit_execution_nk,
-                exit_trade_date,
-                exit_execution_price,
-                active_weight,
-                ?,
-                COALESCE(existing_first_seen_run_id, ?),
-                ?
-            FROM trade_materialized_position_leg_with_action
-            """,
-            [TRADE_CONTRACT_VERSION, run_id, run_id],
-        )
-        connection.execute(
-            """
-            INSERT INTO trade_carry_snapshot (
-                carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
-                carry_status, carried_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+            connection.execute(
+                """
+                DELETE FROM trade_position_leg AS leg
+                USING trade_source_work_unit_summary AS source
+                WHERE leg.portfolio_id = source.portfolio_id
+                    AND leg.symbol = source.symbol
+                """
             )
-            SELECT
-                carry_snapshot_nk,
-                position_leg_nk,
-                portfolio_id,
-                symbol,
-                as_of_trade_date,
-                carry_status,
-                carried_weight,
-                ?,
-                COALESCE(existing_first_seen_run_id, ?),
-                ?
-            FROM trade_materialized_carry_snapshot_with_action
-            """,
-            [TRADE_CONTRACT_VERSION, run_id, run_id],
-        )
-        connection.execute(
-            """
-            INSERT INTO trade_exit_execution (
-                exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
-                exit_trade_date, execution_status, execution_price, exited_weight,
-                blocking_reason_code, exit_reason_code, source_price_line,
-                trade_contract_version, first_seen_run_id, last_materialized_run_id
+            connection.execute(
+                """
+                DELETE FROM trade_carry_snapshot AS carry
+                USING trade_source_work_unit_summary AS source
+                WHERE carry.portfolio_id = source.portfolio_id
+                    AND carry.symbol = source.symbol
+                """
             )
-            SELECT
-                exit_execution_nk,
-                position_leg_nk,
-                candidate_nk,
-                portfolio_id,
-                symbol,
-                exit_trade_date,
-                execution_status,
-                execution_price,
-                exited_weight,
-                blocking_reason_code,
-                exit_reason_code,
-                source_price_line,
-                ?,
-                COALESCE(existing_first_seen_run_id, ?),
-                ?
-            FROM trade_materialized_exit_execution_with_action
-            """,
-            [TRADE_CONTRACT_VERSION, run_id, run_id],
-        )
-        connection.execute(
-            """
-            INSERT INTO trade_run_order_intent (
-                run_id, order_intent_nk, intent_status, materialization_action
+            connection.execute(
+                """
+                DELETE FROM trade_exit_execution AS exit_execution
+                USING trade_source_work_unit_summary AS source
+                WHERE exit_execution.portfolio_id = source.portfolio_id
+                    AND exit_execution.symbol = source.symbol
+                """
             )
-            SELECT ?, order_intent_nk, intent_status, materialization_action
-            FROM trade_materialized_intent_with_action
-            """,
-            [run_id],
+            _record_phase(
+                connection=connection,
+                phase_observer=phase_observer,
+                phase="write_targets_cleared",
+                started_at=delete_started,
+                table_name="trade_source_work_unit_summary",
+                detail=f"work_units_updated={work_units_updated}",
+            )
+            insert_started = perf_counter()
+            connection.execute(
+                """
+                INSERT INTO trade_order_intent (
+                    order_intent_nk, plan_snapshot_nk, candidate_nk, portfolio_id, symbol,
+                    reference_trade_date, planned_trade_date, position_action_decision, intent_status,
+                    requested_weight, admitted_weight, execution_weight, blocking_reason_code,
+                    trade_contract_version, first_seen_run_id, last_materialized_run_id
+                )
+                SELECT
+                    order_intent_nk,
+                    plan_snapshot_nk,
+                    candidate_nk,
+                    portfolio_id,
+                    symbol,
+                    reference_trade_date,
+                    planned_trade_date,
+                    position_action_decision,
+                    intent_status,
+                    requested_weight,
+                    admitted_weight,
+                    execution_weight,
+                    blocking_reason_code,
+                    ?,
+                    COALESCE(existing_first_seen_run_id, ?),
+                    ?
+                FROM trade_materialized_intent_with_action
+                """,
+                [TRADE_CONTRACT_VERSION, run_id, run_id],
+            )
+            connection.execute(
+                """
+                INSERT INTO trade_order_execution (
+                    order_execution_nk, order_intent_nk, portfolio_id, symbol, execution_status,
+                    execution_trade_date, execution_price, executed_weight, blocking_reason_code,
+                    source_price_line, trade_contract_version, first_seen_run_id, last_materialized_run_id
+                )
+                SELECT
+                    order_execution_nk,
+                    order_intent_nk,
+                    portfolio_id,
+                    symbol,
+                    execution_status,
+                    execution_trade_date,
+                    execution_price,
+                    executed_weight,
+                    blocking_reason_code,
+                    source_price_line,
+                    ?,
+                    COALESCE(existing_first_seen_run_id, ?),
+                    ?
+                FROM trade_materialized_execution_with_action
+                """,
+                [TRADE_CONTRACT_VERSION, run_id, run_id],
+            )
+            connection.execute(
+                """
+                INSERT INTO trade_position_leg (
+                    position_leg_nk, candidate_nk, order_intent_nk, portfolio_id, symbol,
+                    entry_reference_trade_date, entry_trade_date, entry_execution_price, position_weight,
+                    scheduled_exit_trade_date, position_state, exit_execution_nk, exit_trade_date,
+                    exit_execution_price, active_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+                )
+                SELECT
+                    position_leg_nk,
+                    candidate_nk,
+                    order_intent_nk,
+                    portfolio_id,
+                    symbol,
+                    entry_reference_trade_date,
+                    entry_trade_date,
+                    entry_execution_price,
+                    position_weight,
+                    scheduled_exit_trade_date,
+                    position_state,
+                    exit_execution_nk,
+                    exit_trade_date,
+                    exit_execution_price,
+                    active_weight,
+                    ?,
+                    COALESCE(existing_first_seen_run_id, ?),
+                    ?
+                FROM trade_materialized_position_leg_with_action
+                """,
+                [TRADE_CONTRACT_VERSION, run_id, run_id],
+            )
+            connection.execute(
+                """
+                INSERT INTO trade_carry_snapshot (
+                    carry_snapshot_nk, position_leg_nk, portfolio_id, symbol, as_of_trade_date,
+                    carry_status, carried_weight, trade_contract_version, first_seen_run_id, last_materialized_run_id
+                )
+                SELECT
+                    carry_snapshot_nk,
+                    position_leg_nk,
+                    portfolio_id,
+                    symbol,
+                    as_of_trade_date,
+                    carry_status,
+                    carried_weight,
+                    ?,
+                    COALESCE(existing_first_seen_run_id, ?),
+                    ?
+                FROM trade_materialized_carry_snapshot_with_action
+                """,
+                [TRADE_CONTRACT_VERSION, run_id, run_id],
+            )
+            connection.execute(
+                """
+                INSERT INTO trade_exit_execution (
+                    exit_execution_nk, position_leg_nk, candidate_nk, portfolio_id, symbol,
+                    exit_trade_date, execution_status, execution_price, exited_weight,
+                    blocking_reason_code, exit_reason_code, source_price_line,
+                    trade_contract_version, first_seen_run_id, last_materialized_run_id
+                )
+                SELECT
+                    exit_execution_nk,
+                    position_leg_nk,
+                    candidate_nk,
+                    portfolio_id,
+                    symbol,
+                    exit_trade_date,
+                    execution_status,
+                    execution_price,
+                    exited_weight,
+                    blocking_reason_code,
+                    exit_reason_code,
+                    source_price_line,
+                    ?,
+                    COALESCE(existing_first_seen_run_id, ?),
+                    ?
+                FROM trade_materialized_exit_execution_with_action
+                """,
+                [TRADE_CONTRACT_VERSION, run_id, run_id],
+            )
+            _record_phase(
+                connection=connection,
+                phase_observer=phase_observer,
+                phase="write_output_tables_loaded",
+                started_at=insert_started,
+                table_name="trade_exit_execution",
+                detail=f"work_units_updated={work_units_updated}",
+            )
+            tracking_started = perf_counter()
+            connection.execute(
+                """
+                INSERT INTO trade_run_order_intent (
+                    run_id, order_intent_nk, intent_status, materialization_action
+                )
+                SELECT ?, order_intent_nk, intent_status, materialization_action
+                FROM trade_materialized_intent_with_action
+                """,
+                [run_id],
+            )
+            _insert_trade_work_queue_sql(connection=connection, run_id=run_id, action_table_name="trade_work_unit_actions")
+            _upsert_trade_checkpoint_sql(connection=connection, run_id=run_id)
+            _record_phase(
+                connection=connection,
+                phase_observer=phase_observer,
+                phase="write_tracking_tables_loaded",
+                started_at=tracking_started,
+                table_name="trade_work_queue",
+                detail=f"work_units_updated={work_units_updated}",
+            )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        _record_phase(
+            connection=connection,
+            phase_observer=phase_observer,
+            phase="write_transaction_committed",
+            started_at=phase_started,
+            table_name="trade_work_queue",
+            detail=f"work_units_updated={work_units_updated}",
         )
-        _insert_trade_work_queue_sql(connection=connection, run_id=run_id, action_table_name="trade_work_unit_actions")
-        _upsert_trade_checkpoint_sql(connection=connection, run_id=run_id)
-        connection.execute("COMMIT")
-    except Exception:
-        connection.execute("ROLLBACK")
-        raise
     return (
         {
             "intents_inserted": int(intent_counts.get("inserted", 0)),
@@ -775,11 +1332,16 @@ def _materialize_trade_sql(
     )
 
 
-def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: str) -> None:
+def _classify_trade_actions(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    existing_catalog: str | None = None,
+) -> None:
     _create_action_table(
         connection=connection,
         materialized_table="trade_materialized_intent",
-        existing_table="trade_order_intent",
+        existing_table_ref=_qualified_trade_table_name(existing_catalog=existing_catalog, table_name="trade_order_intent"),
         key_column="order_intent_nk",
         compare_columns=[
             "plan_snapshot_nk",
@@ -799,7 +1361,7 @@ def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: st
     _create_action_table(
         connection=connection,
         materialized_table="trade_materialized_execution",
-        existing_table="trade_order_execution",
+        existing_table_ref=_qualified_trade_table_name(existing_catalog=existing_catalog, table_name="trade_order_execution"),
         key_column="order_execution_nk",
         compare_columns=[
             "order_intent_nk",
@@ -816,7 +1378,7 @@ def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: st
     _create_action_table(
         connection=connection,
         materialized_table="trade_materialized_position_leg",
-        existing_table="trade_position_leg",
+        existing_table_ref=_qualified_trade_table_name(existing_catalog=existing_catalog, table_name="trade_position_leg"),
         key_column="position_leg_nk",
         compare_columns=[
             "candidate_nk",
@@ -838,7 +1400,7 @@ def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: st
     _create_action_table(
         connection=connection,
         materialized_table="trade_materialized_carry_snapshot",
-        existing_table="trade_carry_snapshot",
+        existing_table_ref=_qualified_trade_table_name(existing_catalog=existing_catalog, table_name="trade_carry_snapshot"),
         key_column="carry_snapshot_nk",
         compare_columns=[
             "position_leg_nk",
@@ -852,7 +1414,7 @@ def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: st
     _create_action_table(
         connection=connection,
         materialized_table="trade_materialized_exit_execution",
-        existing_table="trade_exit_execution",
+        existing_table_ref=_qualified_trade_table_name(existing_catalog=existing_catalog, table_name="trade_exit_execution"),
         key_column="exit_execution_nk",
         compare_columns=[
             "position_leg_nk",
@@ -935,12 +1497,19 @@ def _create_action_table(
     *,
     connection: duckdb.DuckDBPyConnection,
     materialized_table: str,
-    existing_table: str,
+    existing_table_ref: str,
     key_column: str,
     compare_columns: list[str],
 ) -> None:
-    compare_sql = " AND ".join(
-        [f"existing.{column} IS NOT DISTINCT FROM materialized.{column}" for column in compare_columns]
+    connection.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE {materialized_table}_existing_projection AS
+        SELECT
+            {key_column} AS existing_key,
+            first_seen_run_id,
+            {_row_signature_sql(row_alias="existing", compare_columns=compare_columns)} AS compare_signature
+        FROM {existing_table_ref} AS existing
+        """
     )
     connection.execute(
         f"""
@@ -949,13 +1518,13 @@ def _create_action_table(
             materialized.*,
             existing.first_seen_run_id AS existing_first_seen_run_id,
             CASE
-                WHEN existing.{key_column} IS NULL THEN 'inserted'
-                WHEN {compare_sql} THEN 'reused'
+                WHEN existing.existing_key IS NULL THEN 'inserted'
+                WHEN existing.compare_signature = materialized.compare_signature THEN 'reused'
                 ELSE 'rematerialized'
             END AS materialization_action
         FROM {materialized_table} AS materialized
-        LEFT JOIN {existing_table} AS existing
-            ON existing.{key_column} = materialized.{key_column}
+        LEFT JOIN {materialized_table}_existing_projection AS existing
+            ON existing.existing_key = materialized.{key_column}
         """
     )
 
@@ -990,6 +1559,11 @@ def _create_work_unit_change_summary(
         GROUP BY portfolio_id, symbol
         """
     )
+
+
+def _row_signature_sql(*, row_alias: str, compare_columns: list[str]) -> str:
+    compare_args = ",\n            ".join(f"{row_alias}.{column}" for column in compare_columns)
+    return f"hash(\n            {compare_args}\n        )"
 
 
 def _trade_checkpoint_fast_path_available(*, connection: duckdb.DuckDBPyConnection) -> bool:
@@ -1089,6 +1663,8 @@ def _record_reused_trade_sql(
     *,
     connection: duckdb.DuckDBPyConnection,
     run_id: str,
+    phase_observer: Callable[..., None] | None = None,
+    work_unit_count: int,
 ) -> tuple[dict[str, int], int, date | None]:
     connection.execute(
         """
@@ -1103,6 +1679,20 @@ def _record_reused_trade_sql(
         FROM trade_source_work_unit_summary
         """
     )
+    if phase_observer is not None:
+        phase_observer(
+            "action_tables_ready",
+            elapsed_seconds=0.0,
+            row_count=work_unit_count,
+            detail="fast_path_reused=1",
+        )
+        phase_observer(
+            "write_transaction_started",
+            elapsed_seconds=0.0,
+            row_count=work_unit_count,
+            detail="work_units_updated=0 fast_path=1",
+        )
+    phase_started = perf_counter()
     try:
         connection.execute("BEGIN TRANSACTION")
         connection.execute(
@@ -1124,6 +1714,14 @@ def _record_reused_trade_sql(
     except Exception:
         connection.execute("ROLLBACK")
         raise
+    _record_phase(
+        connection=connection,
+        phase_observer=phase_observer,
+        phase="write_transaction_committed",
+        started_at=phase_started,
+        table_name="trade_work_queue",
+        detail="work_units_updated=0 fast_path=1",
+    )
     latest_reference_trade_date = connection.execute(
         "SELECT MAX(last_reference_trade_date) FROM trade_source_work_unit_summary"
     ).fetchone()[0]
@@ -1245,6 +1843,59 @@ def _upsert_trade_checkpoint_sql(*, connection: duckdb.DuckDBPyConnection, run_i
         """,
         [run_id],
     )
+
+
+def profile_trade_live_path(
+    *,
+    portfolio_id: str = "core",
+    settings: WorkspaceRoots | None = None,
+) -> dict[str, object]:
+    workspace = settings or default_settings()
+    workspace.ensure_directories()
+
+    with duckdb.connect(":memory:") as connection:
+        source = _attach_trade_source_views(connection=connection, workspace=workspace, portfolio_id=portfolio_id)
+        recorder = _TradePhaseRecorder(emit_stderr=True)
+        recorder.record(
+            "source_attached",
+            elapsed_seconds=0.0,
+            row_count=source.row_count,
+            detail=f"work_units={source.work_unit_count}",
+        )
+        _attach_trade_profile_existing_catalog(connection=connection, trade_path=workspace.databases.trade)
+        counts, work_units_updated, latest_reference_trade_date = _materialize_trade_sql(
+            connection=connection,
+            run_id="trade-profile",
+            phase_observer=recorder.record,
+            allow_fast_path=False,
+            write_outputs=False,
+            existing_catalog="trade_existing",
+        )
+    dominant_phase = max(recorder.metrics, key=lambda metric: metric.elapsed_seconds).phase if recorder.metrics else None
+    return {
+        "runner_name": "profile_trade_live_path",
+        "source_row_count": source.row_count,
+        "work_units_seen": source.work_unit_count,
+        "work_units_updated": work_units_updated,
+        "latest_reference_trade_date": latest_reference_trade_date.isoformat()
+        if latest_reference_trade_date is not None
+        else None,
+        "dominant_phase": dominant_phase,
+        "materialization_counts": counts,
+        "phase_timings": [metric.as_dict() for metric in recorder.metrics],
+    }
+
+
+def _attach_trade_profile_existing_catalog(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    trade_path: Path,
+) -> None:
+    connection.execute(f"ATTACH {_duckdb_string_literal(trade_path)} AS trade_existing (READ_ONLY)")
+
+
+def _qualified_trade_table_name(*, existing_catalog: str | None, table_name: str) -> str:
+    return f"{existing_catalog}.{table_name}" if existing_catalog is not None else table_name
 
 
 def _attached_table_exists(*, connection: duckdb.DuckDBPyConnection, catalog: str, table_name: str) -> bool:

@@ -306,3 +306,9 @@ Stage-five implementation freeze addendum:
 - 缁撹鏂囨。锛歚docs/03-execution/51-trade-stage-seventeen-live-freeze-gate-conclusion-20260423.md`
 - 瑁佸喅锛歚宸茶褰曪紝trade 寰呬慨`
 - 璇存槑锛欳ard 51 宸插畬鎴?`trade` 妯″潡鍐呮渶灏忓吋瀹逛慨澶嶄笌姝ｅ紡 live preflight锛屼絾姝ｅ紡 rerun `trade-6f780ccc1005` 鍦ㄤ袱涓繛缁娴嬬獥鍙ｅ唴閮芥病鏈?CPU銆乻tderr 鎴栨暟鎹簱鍐欏叆杩涘睍锛屾渶缁堣鏍囪涓?`interrupted`锛涘綋鍓嶆寮?`trade` 浠嶅仠鍦ㄦ棫鎬侊紝鍥犳 `trade = 寰呬慨`锛孲ystem 缁х画鍐荤粨銆?
+
+### `52` trade live slow-path diagnosis and unblock
+
+- 结论文档：`docs/03-execution/52-trade-live-slow-path-diagnosis-and-unblock-conclusion-20260423.md`
+- 裁决：`已记录，trade 待修`
+- 说明：Card 52 已补齐 `trade` phase-level 可观测性与只读 profile，并把 live slow-path 正式收敛到写事务 delete 路径；最新正式 rerun `trade-dbb7397cbd43` 已推进到 `write_transaction_started`，但在 `write_targets_cleared` 之前连续两个观察窗无 `CPU / stderr / db mtime` 进展，因此 `trade` 继续保持 `待修`，`system` 继续冻结。

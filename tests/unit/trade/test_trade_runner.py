@@ -8,6 +8,7 @@ import duckdb
 from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.portfolio_plan.schema import initialize_portfolio_plan_schema
 from astock_lifespan_alpha.trade import TradeRunSummary, run_trade_from_portfolio_plan
+from astock_lifespan_alpha.trade.runner import profile_trade_live_path
 from astock_lifespan_alpha.trade.schema import TRADE_TABLES, initialize_trade_schema
 from astock_lifespan_alpha.trade.source import load_trade_source_rows
 
@@ -114,7 +115,7 @@ def test_trade_runner_materializes_admitted_trimmed_and_blocked_rows(monkeypatch
             "candidate:blocked",
             "rejected",
             date(2026, 1, 4),
-            11.1,
+            None,
             0.0,
             "execution_price_line",
             "portfolio_capacity_exhausted",
@@ -190,6 +191,43 @@ def test_trade_runner_rejects_non_open_missing_next_day_and_missing_open(monkeyp
         ("candidate:missing-next", "rejected", "missing_next_execution_trade_date"),
         ("candidate:missing-open", "rejected", "missing_execution_open_price"),
         ("candidate:not-open", "rejected", "unsupported_position_action"),
+    ]
+
+
+def test_trade_runner_materializes_known_blocked_rows_without_execution_prices(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_portfolio_plan_snapshot(
+        workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb",
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:blocked-no-market",
+                candidate_nk="candidate:blocked-no-market",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.0,
+                plan_status="blocked",
+                blocking_reason_code="portfolio_capacity_exhausted",
+            ),
+        ],
+    )
+
+    summary = run_trade_from_portfolio_plan()
+
+    assert summary.status == "completed"
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"),
+        read_only=True,
+    ) as connection:
+        rows = connection.execute(
+            """
+            SELECT intent.candidate_nk, intent.intent_status, execution.execution_status, execution.blocking_reason_code
+            FROM trade_order_intent AS intent
+            INNER JOIN trade_order_execution AS execution
+                ON execution.order_intent_nk = intent.order_intent_nk
+            """
+        ).fetchall()
+
+    assert rows == [
+        ("candidate:blocked-no-market", "blocked", "rejected", "portfolio_capacity_exhausted"),
     ]
 
 
@@ -430,6 +468,85 @@ def test_trade_runner_forces_full_refresh_when_legacy_trade_shape_matches_checkp
         assert connection.execute("SELECT COUNT(*) FROM trade_position_leg").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM trade_carry_snapshot").fetchone()[0] == 2
         assert connection.execute("SELECT COUNT(*) FROM trade_exit_execution").fetchone()[0] == 1
+
+
+def test_trade_runner_records_phase_progress_message(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_market_base_day(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb",
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:phase",
+                candidate_nk="candidate:phase",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.10,
+                plan_status="admitted",
+            ),
+        ],
+    )
+
+    summary = run_trade_from_portfolio_plan()
+
+    assert "write_transaction_committed" in summary.message
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"),
+        read_only=True,
+    ) as connection:
+        message = connection.execute(
+            "SELECT message FROM trade_run WHERE run_id = ?",
+            [summary.run_id],
+        ).fetchone()[0]
+
+    assert "write_transaction_committed" in message
+
+
+def test_profile_trade_live_path_reports_phase_timings(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_market_base_day(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+            ("AAA", "2026-01-05T00:00:00", 10.7),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb",
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:profile:1",
+                candidate_nk="candidate:profile:1",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.10,
+                plan_status="admitted",
+            ),
+            _plan_row(
+                plan_snapshot_nk="plan:profile:2",
+                candidate_nk="candidate:profile:2",
+                reference_trade_date=date(2026, 1, 3),
+                admitted_weight=0.0,
+                plan_status="blocked",
+                blocking_reason_code="portfolio_capacity_exhausted",
+            ),
+        ],
+    )
+    run_trade_from_portfolio_plan()
+
+    summary = profile_trade_live_path(settings=default_settings(repo_root=workspace / "repo"))
+
+    assert summary["runner_name"] == "profile_trade_live_path"
+    assert summary["source_row_count"] == 2
+    assert summary["work_units_seen"] == 1
+    phases = {phase["phase"] for phase in summary["phase_timings"]}
+    assert {"source_attached", "work_unit_summary_ready", "intent_materialized", "action_tables_ready"}.issubset(phases)
+    assert summary["dominant_phase"] in phases
 
 
 def test_trade_source_reads_stock_daily_adjusted_code_trade_date(monkeypatch, tmp_path):
