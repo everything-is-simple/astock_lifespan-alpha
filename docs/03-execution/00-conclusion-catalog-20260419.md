@@ -336,3 +336,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/56-pipeline-live-freeze-gate-conclusion-20260423.md`
 - 裁决：`已接受，pipeline 放行`
 - 说明：Card 56 已完成 `pipeline` 消费当前已放行业务模块输出的 live freeze gate；最新正式 run `pipeline-88b35c7e6e8a` 已 `completed`，`step_count = 13`，`pipeline_contract_version = stage8_pipeline_v1`，step 12 记录 `trade-594d80dfdf1d`，step 13 记录 `system-7d34ce3dad1f`，`pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到本轮 run；本轮不反向修改或重判 `trade / system`。
+
+### `57` alpha live freeze audit
+
+- 结论文档：`docs/03-execution/57-alpha-live-freeze-audit-conclusion-20260423.md`
+- 裁决：`已接受，alpha 放行`
+- 说明：Card 57 已完成当前 `astock alpha` producer 合同的 live freeze audit；5 个 trigger 与 `alpha_signal` 最新正式 audit runs 均 `completed`，`alpha_signal = 5892934`，`position_run.alpha_source_path` 继续指向正式 `alpha_signal.duckdb`，并且当前 `astock alpha` 与历史 PAS/alpha 体系的差距已作为 legacy delta register 正式登记；本轮不吸收历史 PAS 因子体系，下一顺序切到 `malf`。

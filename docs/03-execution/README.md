@@ -262,3 +262,21 @@ Stage-five implementation defaults are frozen for engineering:
 - `pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到 `pipeline-88b35c7e6e8a`
 - `pipeline` 改为 `放行`
 - 本轮不反向修改或重判 `trade / system`
+
+## Card 57 addendum
+
+- `57` alpha live freeze audit 已登记
+- 正式 audit runs：
+  - `bof-7f0155fe8bf0`
+  - `tst-6eb9d845971d`
+  - `pb-ced2863032cf`
+  - `cpb-d3670031d272`
+  - `bpb-6bb1d9858cf2`
+  - `alpha-signal-755796862970`
+- 所有 runs 均 `completed`
+- `alpha_signal = 5892934`
+- `alpha_signal distinct symbol = 5497`
+- `position_run.alpha_source_path` 继续指向正式 `alpha_signal.duckdb`
+- `alpha` 改为 `放行`
+- legacy delta 已正式登记，但本轮不吸收历史 PAS 因子体系
+- 下一顺序切到 `malf`

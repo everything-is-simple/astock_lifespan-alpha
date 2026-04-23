@@ -291,3 +291,20 @@ Stage-five engineering defaults are frozen:
 - step 13 已记录 `system-7d34ce3dad1f`
 - `pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到 `pipeline-88b35c7e6e8a`
 - 本轮只验收 orchestration，不反向修改或重判 `trade / system`
+
+## 阶段十七与 alpha live freeze audit 更新
+
+- `alpha` Card 57 结论：`docs/03-execution/57-alpha-live-freeze-audit-conclusion-20260423.md`
+- 当前 gate 结论：`alpha = 放行`
+- 最新正式 audit runs：
+  - `bof-7f0155fe8bf0`
+  - `tst-6eb9d845971d`
+  - `pb-ced2863032cf`
+  - `cpb-d3670031d272`
+  - `bpb-6bb1d9858cf2`
+  - `alpha-signal-755796862970`
+- `alpha_signal = 5892934`
+- `position_run.alpha_source_path` 继续指向正式 `alpha_signal.duckdb`
+- 当前 `astock alpha` 被正式界定为 trigger ledger producer，而不是完整 PAS scoring engine
+- 历史 PAS/alpha 差距已登记为后续治理入口，但不在本轮吸收
+- 下一顺序切到 `malf`
