@@ -314,3 +314,18 @@ Stage-five implementation defaults are frozen for engineering:
 - 该 run 遗留的 `25` 条 `running queue` 已全部改为 `interrupted`
 - 当前 `malf_day.duckdb` 已混入 interrupted run 局部 ledger rows，`malf_checkpoint` 已变成混合 `last_run_id`
 - 本轮不继续 forced audit；下一张卡必须先恢复 formal target
+
+## Card 61 addendum
+
+- `61` MALF day formal target 恢复与 isolated regate 已登记
+- 规格：`docs/02-spec/25-stage-twenty-malf-day-formal-target-recovery-and-isolated-regate-spec-v1-20260423.md`
+- 结论：`docs/03-execution/61-malf-day-formal-target-recovery-and-isolated-regate-conclusion-20260423.md`
+- MALF 本地门通过：`28 passed`
+- recovery CLI 已从 `day-fc56ff5e5441` 恢复 canonical target
+- polluted target 已隔离为 `malf_day.quarantine-2892d82b7c0d.duckdb`
+- 新 formal run `day-e687a8277f61` 已 `completed`
+- 本轮 `--no-resume` full-universe rebuild 已走 `.building.duckdb -> promote`
+- `malf_checkpoint.last_run_id` 已全量切到 `day-e687a8277f61`
+- forced audit 已直接命中新 run，未 fallback
+- 7 项硬规则 `passed`
+- 当前 `malf` 剩余问题只剩 `zone_coverage = 3` 软观察

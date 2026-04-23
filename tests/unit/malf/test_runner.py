@@ -9,7 +9,12 @@ import duckdb
 import pytest
 
 import astock_lifespan_alpha.malf.runner as malf_runner_module
-from astock_lifespan_alpha.malf import run_malf_day_build, run_malf_month_build, run_malf_week_build
+from astock_lifespan_alpha.malf import (
+    recover_malf_day_formal_target,
+    run_malf_day_build,
+    run_malf_month_build,
+    run_malf_week_build,
+)
 from astock_lifespan_alpha.malf.source import load_source_bars
 from astock_lifespan_alpha.core.paths import default_settings
 from astock_lifespan_alpha.malf.contracts import Timeframe
@@ -465,6 +470,53 @@ def test_malf_day_full_universe_ignores_checkpointed_stale_running_queue(monkeyp
     assert summary.checkpoint_summary.symbols_updated == 0
 
 
+def test_malf_day_full_universe_no_resume_forces_isolated_build_and_preserves_target_until_promotion(
+    monkeypatch, tmp_path
+):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    _write_day_source_bars(
+        workspace / "data" / "base" / "market_base.duckdb",
+        [
+            ("AAA", "2026-01-02T00:00:00", 10.0, 11.0, 9.5, 10.8),
+            ("AAA", "2026-01-03T00:00:00", 10.8, 12.2, 10.1, 12.0),
+            ("AAA", "2026-01-04T00:00:00", 12.0, 12.1, 11.2, 11.5),
+            ("AAA", "2026-01-05T00:00:00", 11.5, 11.6, 10.0, 10.2),
+        ],
+    )
+    first_summary = run_malf_day_build()
+    target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
+    baseline_run_id = first_summary.run_id
+    promotion_calls: list[tuple[str, str, str]] = []
+
+    def spy_promote(*, build_path: Path, target_path: Path, run_id: str) -> None:
+        promotion_calls.append((str(build_path), str(target_path), run_id))
+        with duckdb.connect(str(target_path), read_only=True) as target_connection:
+            assert target_connection.execute(
+                "SELECT COUNT(*) FROM malf_run WHERE run_id = ?",
+                [run_id],
+            ).fetchone()[0] == 0
+            assert target_connection.execute(
+                "SELECT COUNT(*) FROM malf_run WHERE run_id = ?",
+                [baseline_run_id],
+            ).fetchone()[0] == 1
+        with duckdb.connect(str(build_path), read_only=True) as build_connection:
+            assert build_connection.execute(
+                "SELECT COUNT(*) FROM malf_run WHERE run_id = ?",
+                [run_id],
+            ).fetchone()[0] == 1
+
+    monkeypatch.setattr(malf_runner_module, "_promote_rebuilt_database", spy_promote)
+    summary = run_malf_day_build(resume=False)
+
+    assert summary.artifact_summary.active_build_path is not None
+    assert summary.artifact_summary.active_build_path.endswith(".building.duckdb")
+    assert summary.artifact_summary.promoted_to_target is True
+    assert promotion_calls
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM malf_run WHERE run_id = ?", [summary.run_id]).fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM malf_run WHERE run_id = ?", [baseline_run_id]).fetchone()[0] == 1
+
+
 def test_malf_day_runner_backfills_legacy_building_schema(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_day_source_bars(
@@ -510,6 +562,65 @@ def test_repair_malf_day_schema_repairs_target_and_building_artifacts(monkeypatc
     assert rerun_summary.repaired_database_count == 0
     assert all(database.actions == () for database in rerun_summary.databases)
     assert {database_path: database_path.stat().st_mtime for database_path in original_mtimes} == original_mtimes
+
+
+def test_recover_malf_day_formal_target_restores_baseline_rows_and_clears_running_bookkeeping(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
+    baseline_run_id = "day-fc56ff5e5441"
+    polluted_run_id = "day-107059a919fc"
+    _seed_polluted_malf_day_target(
+        target_path=target_path,
+        baseline_run_id=baseline_run_id,
+        zero_row_completed_run_id="day-a1c965e1f7a9",
+        polluted_run_id=polluted_run_id,
+        stale_running_run_id="day-d696fdcd4774",
+    )
+
+    summary = recover_malf_day_formal_target(
+        baseline_run_id=baseline_run_id,
+        settings=default_settings(repo_root=workspace / "repo"),
+    )
+
+    assert summary.status == "completed"
+    assert summary.resolved_baseline.run_id == baseline_run_id
+    assert summary.recovered_running_run_count == 0
+    assert summary.recovered_running_queue_count == 0
+    assert Path(summary.quarantine_path).exists()
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM malf_run WHERE run_id = ?", [baseline_run_id]).fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM malf_run").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM malf_state_snapshot WHERE run_id = ?", [baseline_run_id]).fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM malf_state_snapshot WHERE run_id = ?", [polluted_run_id]).fetchone()[0] == 0
+        checkpoint_rows = connection.execute(
+            "SELECT symbol, last_run_id FROM malf_checkpoint ORDER BY symbol"
+        ).fetchall()
+        assert checkpoint_rows == [("AAA", baseline_run_id), ("BBB", baseline_run_id)]
+        assert connection.execute(
+            "SELECT COUNT(*) FROM malf_work_queue WHERE status = 'running'"
+        ).fetchone()[0] == 0
+
+
+def test_recover_malf_day_formal_target_ignores_zero_row_completed_runs_when_resolving_baseline(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    target_path = workspace / "data" / "astock_lifespan_alpha" / "malf" / "malf_day.duckdb"
+    baseline_run_id = "day-fc56ff5e5441"
+    _seed_polluted_malf_day_target(
+        target_path=target_path,
+        baseline_run_id=baseline_run_id,
+        zero_row_completed_run_id="day-a1c965e1f7a9",
+        polluted_run_id="day-107059a919fc",
+        stale_running_run_id="day-d696fdcd4774",
+    )
+
+    summary = recover_malf_day_formal_target(settings=default_settings(repo_root=workspace / "repo"))
+
+    assert summary.status == "completed"
+    assert summary.requested_baseline_run_id is None
+    assert summary.resolved_baseline.run_id == baseline_run_id
+    assert summary.resolved_baseline.state_snapshot_rows == 2
+    with duckdb.connect(str(target_path), read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM malf_run WHERE run_id = 'day-a1c965e1f7a9'").fetchone()[0] == 0
 
 
 def test_malf_day_runner_fails_fast_on_duplicate_backward_rows(monkeypatch, tmp_path):
@@ -608,6 +719,213 @@ def _append_day_source_bars(database_path: Path, rows: list[tuple[str, str, floa
         connection.executemany(
             "INSERT INTO market_base_day VALUES (?, ?, ?, ?, ?, ?)",
             [(symbol, datetime.fromisoformat(bar_dt), open_price, high_price, low_price, close_price) for symbol, bar_dt, open_price, high_price, low_price, close_price in rows],
+        )
+
+
+def _seed_polluted_malf_day_target(
+    *,
+    target_path: Path,
+    baseline_run_id: str,
+    zero_row_completed_run_id: str,
+    polluted_run_id: str,
+    stale_running_run_id: str,
+) -> None:
+    initialize_malf_schema(target_path)
+    with duckdb.connect(str(target_path)) as connection:
+        connection.execute("DELETE FROM malf_wave_scale_profile")
+        connection.execute("DELETE FROM malf_wave_scale_snapshot")
+        connection.execute("DELETE FROM malf_state_snapshot")
+        connection.execute("DELETE FROM malf_wave_ledger")
+        connection.execute("DELETE FROM malf_pivot_ledger")
+        connection.execute("DELETE FROM malf_checkpoint")
+        connection.execute("DELETE FROM malf_work_queue")
+        connection.execute("DELETE FROM malf_run")
+        connection.executemany(
+            """
+            INSERT INTO malf_run (
+                run_id,
+                timeframe,
+                status,
+                source_path,
+                input_rows,
+                symbols_total,
+                symbols_seen,
+                symbols_completed,
+                symbols_updated,
+                inserted_pivots,
+                inserted_waves,
+                inserted_state_snapshots,
+                inserted_wave_scale_snapshots,
+                inserted_wave_scale_profiles,
+                current_symbol,
+                elapsed_seconds,
+                estimated_remaining_symbols,
+                latest_bar_dt,
+                message,
+                started_at,
+                finished_at
+            )
+            VALUES (?, 'day', ?, 'seed-source.duckdb', 4, 2, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1.0, 0, TIMESTAMP '2026-01-05 00:00:00', ?, TIMESTAMP '2026-01-05 00:00:00', ?)
+            """,
+            [
+                (baseline_run_id, "completed", 2, 2, 2, 2, 2, 2, 2, 2, "baseline run", datetime(2026, 1, 5, 0, 10)),
+                (zero_row_completed_run_id, "completed", 2, 2, 0, 0, 0, 0, 0, 0, "zero row completed", datetime(2026, 1, 6, 0, 10)),
+                (polluted_run_id, "interrupted", 2, 1, 1, 1, 1, 1, 1, 1, "polluted interrupted", datetime(2026, 1, 7, 0, 10)),
+                (stale_running_run_id, "running", 1, 0, 0, 0, 0, 0, 0, 0, "stale running", None),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_work_queue (
+                queue_id,
+                symbol,
+                timeframe,
+                status,
+                source_bar_count,
+                requested_at,
+                claimed_at,
+                finished_at,
+                last_bar_dt
+            )
+            VALUES (?, ?, 'day', ?, 2, TIMESTAMP '2026-01-05 00:00:00', TIMESTAMP '2026-01-05 00:00:00', ?, TIMESTAMP '2026-01-05 00:00:00')
+            """,
+            [
+                (f"{baseline_run_id}:AAA", "AAA", "completed", datetime(2026, 1, 5, 0, 10)),
+                (f"{baseline_run_id}:BBB", "BBB", "completed", datetime(2026, 1, 5, 0, 10)),
+                (f"{polluted_run_id}:AAA", "AAA", "interrupted", datetime(2026, 1, 7, 0, 10)),
+                (f"{stale_running_run_id}:BBB", "BBB", "running", None),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_pivot_ledger (
+                pivot_nk,
+                run_id,
+                symbol,
+                timeframe,
+                wave_id,
+                bar_dt,
+                pivot_type,
+                price
+            )
+            VALUES (?, ?, ?, 'day', ?, ?, ?, ?)
+            """,
+            [
+                ("pivot-baseline-aaa", baseline_run_id, "AAA", "wave-baseline-aaa", datetime(2026, 1, 4), "hh", 12.0),
+                ("pivot-baseline-bbb", baseline_run_id, "BBB", "wave-baseline-bbb", datetime(2026, 1, 4), "ll", 8.0),
+                ("pivot-polluted-aaa", polluted_run_id, "AAA", "wave-polluted-aaa", datetime(2026, 1, 5), "break_down", 9.0),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_wave_ledger (
+                wave_id,
+                run_id,
+                symbol,
+                timeframe,
+                direction,
+                start_bar_dt,
+                end_bar_dt,
+                guard_bar_dt,
+                guard_price,
+                extreme_price,
+                new_count,
+                no_new_span,
+                life_state
+            )
+            VALUES (?, ?, ?, 'day', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("wave-baseline-aaa", baseline_run_id, "AAA", "up", datetime(2026, 1, 2), datetime(2026, 1, 5), datetime(2026, 1, 4), 10.5, 12.0, 2, 1, "alive"),
+                ("wave-baseline-bbb", baseline_run_id, "BBB", "down", datetime(2026, 1, 2), datetime(2026, 1, 5), datetime(2026, 1, 4), 8.5, 7.8, 2, 1, "alive"),
+                ("wave-polluted-aaa", polluted_run_id, "AAA", "down", datetime(2026, 1, 2), datetime(2026, 1, 5), datetime(2026, 1, 5), 9.2, 8.9, 1, 2, "broken"),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_state_snapshot (
+                snapshot_nk,
+                run_id,
+                symbol,
+                timeframe,
+                bar_dt,
+                wave_id,
+                direction,
+                guard_price,
+                extreme_price,
+                new_count,
+                no_new_span,
+                life_state,
+                update_rank,
+                stagnation_rank,
+                wave_position_zone
+            )
+            VALUES (?, ?, ?, 'day', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("snapshot-baseline-aaa", baseline_run_id, "AAA", datetime(2026, 1, 5), "wave-baseline-aaa", "up", 10.5, 12.0, 2, 1, "alive", 0.8, 0.2, "mature_progress"),
+                ("snapshot-baseline-bbb", baseline_run_id, "BBB", datetime(2026, 1, 5), "wave-baseline-bbb", "down", 8.5, 7.8, 2, 1, "alive", 0.7, 0.3, "mature_progress"),
+                ("snapshot-polluted-aaa", polluted_run_id, "AAA", datetime(2026, 1, 5), "wave-polluted-aaa", "down", 9.2, 8.9, 1, 2, "broken", 0.4, 0.8, "weak_stagnation"),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_wave_scale_snapshot (
+                snapshot_nk,
+                run_id,
+                symbol,
+                timeframe,
+                bar_dt,
+                direction,
+                wave_id,
+                new_count,
+                no_new_span,
+                life_state,
+                update_rank,
+                stagnation_rank,
+                wave_position_zone
+            )
+            VALUES (?, ?, ?, 'day', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("scale-snapshot-baseline-aaa", baseline_run_id, "AAA", datetime(2026, 1, 5), "up", "wave-baseline-aaa", 2, 1, "alive", 0.8, 0.2, "mature_progress"),
+                ("scale-snapshot-baseline-bbb", baseline_run_id, "BBB", datetime(2026, 1, 5), "down", "wave-baseline-bbb", 2, 1, "alive", 0.7, 0.3, "mature_progress"),
+                ("scale-snapshot-polluted-aaa", polluted_run_id, "AAA", datetime(2026, 1, 5), "down", "wave-polluted-aaa", 1, 2, "broken", 0.4, 0.8, "weak_stagnation"),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_wave_scale_profile (
+                profile_nk,
+                run_id,
+                symbol,
+                timeframe,
+                direction,
+                wave_id,
+                sample_size,
+                new_count,
+                no_new_span,
+                update_rank,
+                stagnation_rank,
+                wave_position_zone
+            )
+            VALUES (?, ?, ?, 'day', ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("profile-baseline-aaa", baseline_run_id, "AAA", "up", "wave-baseline-aaa", 10, 2, 1, 0.8, 0.2, "mature_progress"),
+                ("profile-baseline-bbb", baseline_run_id, "BBB", "down", "wave-baseline-bbb", 10, 2, 1, 0.7, 0.3, "mature_progress"),
+                ("profile-polluted-aaa", polluted_run_id, "AAA", "down", "wave-polluted-aaa", 5, 1, 2, 0.4, 0.8, "weak_stagnation"),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO malf_checkpoint (symbol, timeframe, last_bar_dt, last_run_id, updated_at)
+            VALUES (?, 'day', ?, ?, TIMESTAMP '2026-01-07 00:00:00')
+            """,
+            [
+                ("AAA", datetime(2026, 1, 5), polluted_run_id),
+                ("BBB", datetime(2026, 1, 5), baseline_run_id),
+            ],
         )
 
 

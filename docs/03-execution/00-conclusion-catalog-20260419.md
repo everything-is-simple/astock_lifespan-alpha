@@ -360,3 +360,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/60-malf-day-live-formal-regate-conclusion-20260423.md`
 - 裁决：`已记录阻塞，live formal gate 未通过`
 - 说明：Card 60 已按计划发起 `--no-resume` full-universe rebuild，并生成 `day-107059a919fc`；MALF 本地门 `25 passed`。但本轮 live rebuild 卡死在 target 直写路径，未形成新的 `completed` formal run，且正式库已混入 interrupted run 局部 rows 与混合 checkpoint provenance；因此本轮只将 stale run 及其 `25` 条 running queue 收为 `interrupted`，不继续 forced audit，`malf` 保持待修。
+
+### `61` MALF day formal target 恢复与 isolated regate
+
+- 结论文档：`docs/03-execution/61-malf-day-formal-target-recovery-and-isolated-regate-conclusion-20260423.md`
+- 裁决：`已接受，恢复与 isolated rebuild 通过；live semantic gate 仍部分通过`
+- 说明：Card 61 已新增 `recover_malf_day_formal_target` 与新的 `day + full_universe + --no-resume` staging build 合同；MALF 单测 `28 passed`。本轮先从 `day-fc56ff5e5441` 恢复 canonical target 并隔离 polluted target，再生成新的 formal run `day-e687a8277f61`，`promoted_to_target = true`，forced audit 直接命中新 run，7 项硬规则全部 `pass`。当前剩余入口只剩 `zone_coverage = 3` 这一个软观察，不再是 recovery/build 基础设施阻塞。

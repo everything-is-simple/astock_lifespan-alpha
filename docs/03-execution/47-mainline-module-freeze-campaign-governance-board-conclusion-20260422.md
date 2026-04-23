@@ -56,3 +56,21 @@ Card 60 的正式判断：
 | --- | --- | --- | --- | --- |
 | `alpha` | `放行` | `2026-04-23 alpha live freeze audit` | 保持正式 producer 输出 | Card 57 已通过 |
 | `malf` | `待修` | `2026-04-23 Card 60 live formal rebuild regate` | 先恢复 formal target，再重发 `day` rebuild | `day-107059a919fc` stale `running` 后留下 interrupted rows 与 mixed checkpoint provenance |
+
+## Card 61 addendum
+
+截至 Card 61 收口，治理面板对 `malf` 补充如下：
+
+- Card 60 的 recovery/build 基础设施 blocker 已清除
+- 新 formal run `day-e687a8277f61` 已 `completed`
+- `malf_checkpoint.last_run_id` 已全量切到 `day-e687a8277f61`
+- forced audit 已直接命中新 run，未 fallback
+- 7 项硬规则全部 `pass`
+- 当前剩余偏差只剩 `zone_coverage = 3` 这一项软观察 flag
+
+因此面板状态更新为：
+
+| 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻塞原因/备注 |
+| --- | --- | --- | --- | --- |
+| `alpha` | `放行` | `2026-04-23 alpha live freeze audit` | 保持正式 producer 输出 | Card 57 已通过 |
+| `malf` | `待修` | `2026-04-23 Card 61 formal target recovery and isolated regate` | 只围绕 `zone_coverage` 软观察继续收口 | recovery/quarantine/staging rebuild 已通过，剩余问题不再是基础设施 |

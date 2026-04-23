@@ -59,7 +59,9 @@ card -> evidence -> record -> conclusion
 39. `docs/03-execution/45-stage-sixteen-incremental-resume-spec-freeze-conclusion-20260421.md`
 40. `docs/03-execution/46-stage-sixteen-incremental-resume-engineering-closeout-conclusion-20260421.md`
 41. `docs/03-execution/50-portfolio-plan-live-050-cutover-performance-repair-and-regate-conclusion-20260422.md`
-41. `docs/02-spec/22-stage-seventeen-rolling-backtest-minimal-v1-spec-20260421.md`
+42. `docs/02-spec/22-stage-seventeen-rolling-backtest-minimal-v1-spec-20260421.md`
+43. `docs/02-spec/25-stage-twenty-malf-day-formal-target-recovery-and-isolated-regate-spec-v1-20260423.md`
+44. `docs/03-execution/61-malf-day-formal-target-recovery-and-isolated-regate-conclusion-20260423.md`
 
 ## 目录职责
 
@@ -339,3 +341,15 @@ Stage-five engineering defaults are frozen:
 - 本轮遗留的 `25` 条 `running queue` 已改为 `interrupted`
 - 当前 `malf_day.duckdb` 已混入 interrupted run 局部 rows，`malf_checkpoint` 也已成为混合 `last_run_id`
 - 下一张卡必须先恢复 formal target，再允许重新发起 `day` rebuild
+
+## 阶段二十与 Card 61 补充
+
+- 新规格：`docs/02-spec/25-stage-twenty-malf-day-formal-target-recovery-and-isolated-regate-spec-v1-20260423.md`
+- `malf` Card 61 结论：`docs/03-execution/61-malf-day-formal-target-recovery-and-isolated-regate-conclusion-20260423.md`
+- 当前工程结论：`formal target recovery = 通过`
+- 当前语义结论：`malf live semantic gate = 仍部分通过`
+- canonical `malf_day.duckdb` 已从 `day-fc56ff5e5441` baseline 恢复后重建到新 formal run `day-e687a8277f61`
+- polluted target 已隔离为 `malf_day.quarantine-2892d82b7c0d.duckdb`
+- 本轮 `--no-resume` full-universe rebuild 已正式走 `.building.duckdb -> promote`
+- forced audit 已直接命中新 run，7 项硬规则全部通过
+- 当前唯一剩余入口是 `zone_coverage = 3` 的软观察，不再是 recovery/build 基础设施问题

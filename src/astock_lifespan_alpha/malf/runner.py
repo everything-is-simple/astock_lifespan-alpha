@@ -234,6 +234,13 @@ def _resolve_day_build_artifacts(
             reverse=True,
         )
     )
+    if selection.full_universe and not selection.resume:
+        build_path = target_path.with_name(f"{target_path.stem}.{run_id}.building{target_path.suffix}")
+        return _DayBuildArtifacts(
+            active_target_path=build_path,
+            active_build_path=build_path,
+            abandoned_build_artifacts=existing_builds,
+        )
     if selection.full_universe and target_path.exists() and not _target_has_incomplete_work(target_path):
         return _DayBuildArtifacts(
             active_target_path=target_path,
