@@ -52,6 +52,14 @@ def test_malf_day_semantic_audit_writes_reports_and_artifacts(monkeypatch, tmp_p
     payload = json.loads(Path(report.summary_json_path).read_text(encoding="utf-8"))
     assert payload["target_run_id"] == run_summary.run_id
     assert payload["table_artifacts"][0]["table_name"] == "wave_summary"
+    zone_coverage = next(
+        item for item in payload["soft_observations"] if item["observation_name"] == "zone_coverage"
+    )
+    markdown = Path(report.summary_markdown_path).read_text(encoding="utf-8")
+    assert zone_coverage["threshold"] == "expected 4 distinct zones in state_snapshot_sample"
+    assert zone_coverage["note"] == "按 state_snapshot_sample 统计的 sample coverage，不代表全量 malf_state_snapshot。"
+    assert "state_snapshot_sample" in markdown
+    assert "sample coverage" in markdown
     with duckdb.connect(str(report.artifact_database_path), read_only=True) as connection:
         table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
         assert {"wave_summary", "state_snapshot_sample", "break_events", "reborn_windows"}.issubset(table_names)

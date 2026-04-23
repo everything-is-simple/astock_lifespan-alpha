@@ -96,6 +96,13 @@ WavePosition = (direction, update-rank, stagnation-rank, life-state)
   - `weak_stagnation`
 - 由于 Stage 18 硬规则已把 zone 分类函数写入审计基线，本轮不改 `audit.py` 硬规则，只通过 engine 语义状态变化改善四区覆盖
 
+### 5.4 `broken` / snapshot 分层
+
+- `broken` 仍定义为旧波终止态，正式写入 `malf_wave_ledger`。
+- `malf_state_snapshot` 继续只描述当前正在展开的新波生命周期。
+- `malf_state_snapshot` 正式 materialize `reborn / alive`，不单独展开 `broken`。
+- `zone_coverage` 只解释为 `state_snapshot_sample` 的 sample coverage。
+
 ## 6. Public contract 不变项
 
 本轮不得修改以下 public shape：

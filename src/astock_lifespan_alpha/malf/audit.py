@@ -1610,8 +1610,8 @@ def _collect_soft_observations(
             observation_name="zone_coverage",
             status="ok" if int(zone_count) == 4 else "flag",
             value=int(zone_count),
-            threshold="expected 4 distinct zones in sampled windows",
-            note="样本图层是否覆盖四个 wave_position_zone。",
+            threshold="expected 4 distinct zones in state_snapshot_sample",
+            note="按 state_snapshot_sample 统计的 sample coverage，不代表全量 malf_state_snapshot。",
         ),
         SoftObservation(
             observation_name="reborn_median_bar_count",
@@ -1682,7 +1682,8 @@ def _render_markdown_summary(summary: MalfSemanticAuditSummary) -> str:
     lines.extend(["", "## Soft Observations", ""])
     for observation in summary.soft_observations:
         lines.append(
-            f"- `{observation.observation_name}` status=`{observation.status}` value=`{observation.value}` threshold=`{observation.threshold}`"
+            f"- `{observation.observation_name}` status=`{observation.status}` value=`{observation.value}` "
+            f"threshold=`{observation.threshold}` note=`{observation.note}`"
         )
     lines.extend(["", "## Required Tables", ""])
     for artifact in summary.table_artifacts:

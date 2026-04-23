@@ -108,6 +108,12 @@ Life = (direction, new_count, no_new_span, life_state)
 - `broken`：旧波 guard 已失效，旧波终止。
 - `reborn`：旧波已失效，但新方向第一次有效 `new_count` 尚未确认。
 
+补充冻结边界：
+
+- `broken` 是旧波终止态，正式写入 `malf_wave_ledger`。
+- `malf_state_snapshot` 只描述当前正在展开的新波生命周期。
+- `malf_state_snapshot` 正式 materialize `reborn / alive`，不单独展开 `broken`。
+
 ## 5. Guard 与 Break
 
 ### 5.1 guard 定义
@@ -231,6 +237,7 @@ WavePosition = (direction, update_rank, stagnation_rank, life_state)
 - `malf_state_snapshot` 面向内部状态审计
 - `malf_wave_scale_snapshot` 面向 `alpha` 正式读取
 - `malf_wave_scale_profile` 面向 rank / zone 画像
+- `malf_wave_ledger` 保留旧波终止态，因此 `broken` 在 ledger 层冻结保留
 
 ## 10. 面向 Alpha 的最小输出
 

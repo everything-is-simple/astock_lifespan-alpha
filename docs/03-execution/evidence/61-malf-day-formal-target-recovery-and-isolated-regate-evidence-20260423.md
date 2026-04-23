@@ -178,14 +178,30 @@ python scripts/malf/audit_malf_day_semantics.py --run-id day-e687a8277f61 --samp
 
 软观察：
 
-- `zone_coverage = flag (3)`
+- `zone_coverage = flag (3, state_snapshot_sample sample coverage)`
 - `reborn_median_bar_count = ok (2.0)`
 - `single_bar_reborn_share = ok (0.3119)`
 - `guard_churn_p90 = ok (0.25)`
+
+live formal ledger 只读核实：
+
+- `malf_state_snapshot.life_state`
+  - `alive = 10103382`
+  - `reborn = 6244731`
+- `malf_wave_ledger.life_state`
+  - `broken = 2442547`
+  - `alive = 3300`
+  - `reborn = 2201`
+- `malf_state_snapshot.wave_position_zone`
+  - `mature_stagnation = 8227525`
+  - `early_progress = 6246189`
+  - `mature_progress = 1872674`
+  - `weak_stagnation = 1725`
 
 ## 6. 本轮正式证据结论
 
 - Card 60 的 formal target 污染已被 recovery/quarantine 正式收口
 - `day + full_universe + --no-resume` 已重新回到 isolated staging build 正式路径
 - Stage 19 新 formal run 已成功生成并被 forced audit 直接命中
-- 当前 `MALF day` 的剩余问题不再是 recovery/build 基础设施，而是 `zone_coverage = 3` 的唯一软观察残留
+- 当前 `MALF day` 的剩余问题不再是 recovery/build 基础设施，而是 `zone_coverage = 3` 的 sample coverage 软观察残留
+- 四区在全量 `malf_state_snapshot` 中已全部存在，因此该 flag 不应解释为 formal target 缺区

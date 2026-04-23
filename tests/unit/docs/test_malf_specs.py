@@ -25,6 +25,10 @@ def test_malf_semantic_spec_defines_frozen_terms():
     for term in required_terms:
         assert term in content
 
+    assert "`broken` 是旧波终止态，正式写入 `malf_wave_ledger`。" in content
+    assert "`malf_state_snapshot` 只描述当前正在展开的新波生命周期。" in content
+    assert "正式 materialize `reborn / alive`，不单独展开 `broken`" in content
+
 
 def test_malf_diagram_spec_maps_text_rules():
     repo_root = Path(__file__).resolve().parents[3]
@@ -39,6 +43,23 @@ def test_malf_diagram_spec_maps_text_rules():
         "reborn",
         "guard",
         "wave_position_zone",
+    ]
+
+    for term in required_terms:
+        assert term in content
+
+
+def test_stage_nineteen_spec_freezes_broken_to_ledger_boundary():
+    repo_root = Path(__file__).resolve().parents[3]
+    content = (
+        repo_root / "docs" / "02-spec" / "24-stage-nineteen-malf-day-engine-semantic-repair-spec-v1-20260423.md"
+    ).read_text(encoding="utf-8")
+
+    required_terms = [
+        "`broken` 仍定义为旧波终止态，正式写入 `malf_wave_ledger`。",
+        "`malf_state_snapshot` 继续只描述当前正在展开的新波生命周期。",
+        "正式 materialize `reborn / alive`，不单独展开 `broken`。",
+        "`zone_coverage` 只解释为 `state_snapshot_sample` 的 sample coverage。",
     ]
 
     for term in required_terms:
