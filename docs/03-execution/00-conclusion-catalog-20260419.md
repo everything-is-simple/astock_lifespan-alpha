@@ -348,3 +348,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/58-malf-day-semantic-revalidation-gate-conclusion-20260423.md`
 - 裁决：`部分通过`
 - 说明：Card 58 已完成 `day` 周期 MALF 纯语义重验；请求审计 run 为 `day-a1c965e1f7a9`，但该 run 未物化核心账本，因此按规格回落到 `day-fc56ff5e5441`。7 项硬规则全部通过，但 `zone_coverage = 2`、`reborn_median_bar_count = 1.0`、`single_bar_reborn_share = 0.8085`、`guard_churn_p90 = 0.75` 全部触发软观察 flag，因此当前 `malf` 被正式登记为“可审计、可复现、内部自洽的最小骨架”，下一张卡只允许进入 `engine` 纯语义修复。
+
+### `59` MALF day engine 纯语义修复
+
+- 结论文档：`docs/03-execution/59-malf-day-engine-semantic-repair-conclusion-20260423.md`
+- 裁决：`已记录，代码落地；live formal gate 待重算`
+- 说明：Card 59 已完成 `engine.py` 的纯语义状态机修复，并新增 `reborn` 连续窗口、确认式 `guard`、四区 `zone` 覆盖单测；MALF 相关单测 `25 passed`。同时复跑了 `audit_malf_day_semantics`，但由于本轮未进入 live build，formal ledger 仍是旧 run 物化结果，因此 live formal gate 结论未从 Card 58 前移。

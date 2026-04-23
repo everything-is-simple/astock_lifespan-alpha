@@ -292,3 +292,13 @@ Stage-five implementation defaults are frozen for engineering:
 - 4 项软观察触发 flag
 - 当前 `malf = 部分通过`
 - 下一步只允许进入 `engine` 纯语义修复
+
+## Card 59 addendum
+
+- `59` MALF day engine semantic repair 已登记
+- 规格：`docs/02-spec/24-stage-nineteen-malf-day-engine-semantic-repair-spec-v1-20260423.md`
+- 结论：`docs/03-execution/59-malf-day-engine-semantic-repair-conclusion-20260423.md`
+- 本轮只修改 `engine.py` 与 `test_engine.py`
+- 新增 `reborn` 连续窗口、确认式 `guard`、四区 `zone` 覆盖测试
+- MALF 相关单测：`25 passed`
+- live semantic audit 已复跑，但因 formal ledger 未重算，当前 `malf` live formal gate 不前移

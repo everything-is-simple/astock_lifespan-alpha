@@ -318,3 +318,13 @@ Stage-five engineering defaults are frozen:
 - 本轮生效审计 run：`day-fc56ff5e5441`
 - 7 项硬规则全部通过
 - 4 项软观察全部触发 flag，下一步只允许进入 `engine` 纯语义修复
+
+## 阶段十九与 MALF day engine 纯语义修复更新
+
+- 新规格：`docs/02-spec/24-stage-nineteen-malf-day-engine-semantic-repair-spec-v1-20260423.md`
+- `malf` Card 59 结论：`docs/03-execution/59-malf-day-engine-semantic-repair-conclusion-20260423.md`
+- 当前结论：`代码落地；live formal gate 待重算`
+- 本轮把 authority stack 明确切为“图版优先”
+- 本轮只修改 `engine.py` 与 `test_engine.py`，不进入 `runner / build / queue / checkpoint / schema`
+- MALF 相关单测通过：`25 passed`
+- live semantic audit 已复跑，但因 formal ledger 未重算，结论仍停留在 Card 58 的旧 run 结果

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
@@ -86,6 +86,7 @@ class _WaveState:
     new_count: int
     no_new_span: int
     life_state: LifeState
+    pending_guard_price: float | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,7 @@ def _initialize_state(symbol: str, timeframe: Timeframe, bars: list[OhlcBar]) ->
         new_count=0,
         no_new_span=0,
         life_state=LifeState.ALIVE,
+        pending_guard_price=None,
     )
 
 
@@ -273,24 +275,25 @@ def _transition_state(
                 new_count=0,
                 no_new_span=0,
                 life_state=LifeState.REBORN,
+                pending_guard_price=None,
             )
             return pivots, finished_wave, next_state
 
-        next_state = _WaveState(**current_state.__dict__)
-        if current_bar.high > current_state.extreme_price:
-            next_state.extreme_price = current_bar.high
-            next_state.new_count += 1
-            next_state.no_new_span = 0
-            if next_state.life_state is LifeState.REBORN:
-                next_state.life_state = LifeState.ALIVE
-            pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "HH", current_bar.high))
-        else:
-            next_state.no_new_span += 1
-        if current_bar.low > next_state.guard_price:
-            next_state.guard_price = current_bar.low
-            next_state.guard_bar_dt = current_bar.bar_dt
-            pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "HL", current_bar.low))
-        return pivots, None, next_state
+        if current_state.life_state is LifeState.REBORN:
+            return _advance_up_reborn(
+                symbol=symbol,
+                timeframe=timeframe,
+                wave_id=wave_id,
+                current_state=current_state,
+                current_bar=current_bar,
+            )
+        return _advance_up_alive(
+            symbol=symbol,
+            timeframe=timeframe,
+            wave_id=wave_id,
+            current_state=current_state,
+            current_bar=current_bar,
+        )
 
     if current_bar.high > current_state.guard_price:
         finished_wave = WaveRow(
@@ -318,24 +321,167 @@ def _transition_state(
             new_count=0,
             no_new_span=0,
             life_state=LifeState.REBORN,
+            pending_guard_price=None,
         )
         return pivots, finished_wave, next_state
 
-    next_state = _WaveState(**current_state.__dict__)
+    if current_state.life_state is LifeState.REBORN:
+        return _advance_down_reborn(
+            symbol=symbol,
+            timeframe=timeframe,
+            wave_id=wave_id,
+            current_state=current_state,
+            current_bar=current_bar,
+        )
+    return _advance_down_alive(
+        symbol=symbol,
+        timeframe=timeframe,
+        wave_id=wave_id,
+        current_state=current_state,
+        current_bar=current_bar,
+    )
+
+
+def _advance_up_reborn(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    wave_id: str,
+    current_state: _WaveState,
+    current_bar: OhlcBar,
+) -> tuple[list[PivotRow], WaveRow | None, _WaveState]:
+    pivots: list[PivotRow] = []
+    next_state = replace(current_state)
+
+    if current_state.pending_guard_price is not None and current_bar.high > current_state.extreme_price:
+        next_state.extreme_price = current_bar.high
+        next_state.new_count = 1
+        next_state.no_new_span = 0
+        next_state.life_state = LifeState.ALIVE
+        pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "HH", current_bar.high))
+        _confirm_up_guard(symbol=symbol, timeframe=timeframe, wave_id=wave_id, current_bar=current_bar, state=next_state, pivots=pivots)
+        return pivots, None, next_state
+
+    next_state.no_new_span += 1
+    if current_bar.high > next_state.extreme_price:
+        next_state.extreme_price = current_bar.high
+    if current_bar.low > current_state.guard_price:
+        next_state.pending_guard_price = max(current_state.pending_guard_price or current_bar.low, current_bar.low)
+    return pivots, None, next_state
+
+
+def _advance_up_alive(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    wave_id: str,
+    current_state: _WaveState,
+    current_bar: OhlcBar,
+) -> tuple[list[PivotRow], WaveRow | None, _WaveState]:
+    pivots: list[PivotRow] = []
+    next_state = replace(current_state)
+
+    if current_bar.high > current_state.extreme_price:
+        next_state.extreme_price = current_bar.high
+        next_state.new_count += 1
+        next_state.no_new_span = 0
+        pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "HH", current_bar.high))
+        _confirm_up_guard(symbol=symbol, timeframe=timeframe, wave_id=wave_id, current_bar=current_bar, state=next_state, pivots=pivots)
+        return pivots, None, next_state
+
+    next_state.no_new_span += 1
+    if current_bar.low > current_state.guard_price:
+        next_state.pending_guard_price = max(current_state.pending_guard_price or current_bar.low, current_bar.low)
+    return pivots, None, next_state
+
+
+def _advance_down_reborn(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    wave_id: str,
+    current_state: _WaveState,
+    current_bar: OhlcBar,
+) -> tuple[list[PivotRow], WaveRow | None, _WaveState]:
+    pivots: list[PivotRow] = []
+    next_state = replace(current_state)
+
+    if current_state.pending_guard_price is not None and current_bar.low < current_state.extreme_price:
+        next_state.extreme_price = current_bar.low
+        next_state.new_count = 1
+        next_state.no_new_span = 0
+        next_state.life_state = LifeState.ALIVE
+        pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "LL", current_bar.low))
+        _confirm_down_guard(symbol=symbol, timeframe=timeframe, wave_id=wave_id, current_bar=current_bar, state=next_state, pivots=pivots)
+        return pivots, None, next_state
+
+    next_state.no_new_span += 1
+    if current_bar.low < next_state.extreme_price:
+        next_state.extreme_price = current_bar.low
+    if current_bar.high < current_state.guard_price:
+        next_state.pending_guard_price = min(current_state.pending_guard_price or current_bar.high, current_bar.high)
+    return pivots, None, next_state
+
+
+def _advance_down_alive(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    wave_id: str,
+    current_state: _WaveState,
+    current_bar: OhlcBar,
+) -> tuple[list[PivotRow], WaveRow | None, _WaveState]:
+    pivots: list[PivotRow] = []
+    next_state = replace(current_state)
+
     if current_bar.low < current_state.extreme_price:
         next_state.extreme_price = current_bar.low
         next_state.new_count += 1
         next_state.no_new_span = 0
-        if next_state.life_state is LifeState.REBORN:
-            next_state.life_state = LifeState.ALIVE
         pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "LL", current_bar.low))
-    else:
-        next_state.no_new_span += 1
-    if current_bar.high < next_state.guard_price:
-        next_state.guard_price = current_bar.high
-        next_state.guard_bar_dt = current_bar.bar_dt
-        pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "LH", current_bar.high))
+        _confirm_down_guard(symbol=symbol, timeframe=timeframe, wave_id=wave_id, current_bar=current_bar, state=next_state, pivots=pivots)
+        return pivots, None, next_state
+
+    next_state.no_new_span += 1
+    if current_bar.high < current_state.guard_price:
+        next_state.pending_guard_price = min(current_state.pending_guard_price or current_bar.high, current_bar.high)
     return pivots, None, next_state
+
+
+def _confirm_up_guard(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    wave_id: str,
+    current_bar: OhlcBar,
+    state: _WaveState,
+    pivots: list[PivotRow],
+) -> None:
+    if state.pending_guard_price is None or state.pending_guard_price <= state.guard_price:
+        state.pending_guard_price = None
+        return
+    state.guard_price = state.pending_guard_price
+    state.guard_bar_dt = current_bar.bar_dt
+    pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "HL", state.guard_price))
+    state.pending_guard_price = None
+
+
+def _confirm_down_guard(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    wave_id: str,
+    current_bar: OhlcBar,
+    state: _WaveState,
+    pivots: list[PivotRow],
+) -> None:
+    if state.pending_guard_price is None or state.pending_guard_price >= state.guard_price:
+        state.pending_guard_price = None
+        return
+    state.guard_price = state.pending_guard_price
+    state.guard_bar_dt = current_bar.bar_dt
+    pivots.append(_pivot(symbol, timeframe, wave_id, current_bar.bar_dt, "LH", state.guard_price))
+    state.pending_guard_price = None
 
 
 def _pivot(symbol: str, timeframe: Timeframe, wave_id: str, bar_dt: datetime, pivot_type: str, price: float) -> PivotRow:
