@@ -309,6 +309,129 @@ def test_trade_runner_materializes_exit_and_carry_rows(monkeypatch, tmp_path):
     assert carry_rows == [("open", date(2026, 1, 4), 0.10), ("closed", date(2026, 1, 5), 0.0)]
 
 
+def test_trade_runner_reuses_and_rematerializes_multi_row_work_unit(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    market_path = workspace / "data" / "base" / "market_base.duckdb"
+    portfolio_plan_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
+    _write_market_base_day(
+        market_path,
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        portfolio_plan_path,
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:multi:1",
+                candidate_nk="candidate:multi:1",
+                symbol="AAA",
+                reference_trade_date=date(2026, 1, 3),
+                requested_weight=0.10,
+                admitted_weight=0.10,
+                trimmed_weight=0.0,
+                plan_status="admitted",
+            ),
+            _plan_row(
+                plan_snapshot_nk="plan:multi:2",
+                candidate_nk="candidate:multi:2",
+                symbol="AAA",
+                reference_trade_date=date(2026, 1, 3),
+                requested_weight=0.10,
+                admitted_weight=0.03,
+                trimmed_weight=0.07,
+                plan_status="trimmed",
+                blocking_reason_code="portfolio_capacity_trimmed",
+            ),
+        ],
+    )
+
+    first_summary = run_trade_from_portfolio_plan()
+    second_summary = run_trade_from_portfolio_plan()
+    _update_admitted_weight(portfolio_plan_path, plan_snapshot_nk="plan:multi:1", admitted_weight=0.05)
+    third_summary = run_trade_from_portfolio_plan()
+
+    assert first_summary.materialization_counts["intents_inserted"] == 2
+    assert second_summary.materialization_counts["intents_reused"] == 2
+    assert second_summary.checkpoint_summary.work_units_updated == 0
+    assert third_summary.checkpoint_summary.work_units_updated == 1
+    with duckdb.connect(
+        str(workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"),
+        read_only=True,
+    ) as connection:
+        latest_actions = connection.execute(
+            """
+            SELECT intent.candidate_nk, run_intent.materialization_action
+            FROM trade_run_order_intent AS run_intent
+            INNER JOIN trade_order_intent AS intent
+                ON intent.order_intent_nk = run_intent.order_intent_nk
+            WHERE run_intent.run_id = ?
+            ORDER BY candidate_nk
+            """,
+            [third_summary.run_id],
+        ).fetchall()
+        weights = connection.execute(
+            """
+            SELECT candidate_nk, execution_weight
+            FROM trade_order_intent
+            WHERE candidate_nk LIKE 'candidate:multi:%'
+            ORDER BY candidate_nk
+            """
+        ).fetchall()
+
+    assert latest_actions == [
+        ("candidate:multi:1", "rematerialized"),
+        ("candidate:multi:2", "reused"),
+    ]
+    assert weights == [("candidate:multi:1", 0.05), ("candidate:multi:2", 0.03)]
+
+
+def test_trade_runner_forces_full_refresh_when_legacy_trade_shape_matches_checkpoint(monkeypatch, tmp_path):
+    workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    market_path = workspace / "data" / "base" / "market_base.duckdb"
+    portfolio_plan_path = workspace / "data" / "astock_lifespan_alpha" / "portfolio_plan" / "portfolio_plan.duckdb"
+    trade_path = workspace / "data" / "astock_lifespan_alpha" / "trade" / "trade.duckdb"
+    _write_market_base_day(
+        market_path,
+        [
+            ("AAA", "2026-01-03T00:00:00", 10.0),
+            ("AAA", "2026-01-04T00:00:00", 11.1),
+            ("AAA", "2026-01-05T00:00:00", 10.7),
+        ],
+    )
+    _write_portfolio_plan_snapshot(
+        portfolio_plan_path,
+        [
+            _plan_row(
+                plan_snapshot_nk="plan:legacy",
+                candidate_nk="candidate:legacy",
+                reference_trade_date=date(2026, 1, 3),
+                planned_entry_trade_date=date(2026, 1, 4),
+                scheduled_exit_trade_date=date(2026, 1, 5),
+                planned_exit_reason_code="signal_not_confirmed_exit",
+                admitted_weight=0.10,
+                plan_status="admitted",
+            )
+        ],
+    )
+    initial_summary = run_trade_from_portfolio_plan()
+    _reset_trade_to_legacy_shape(trade_path, last_run_id=initial_summary.run_id)
+
+    summary = run_trade_from_portfolio_plan()
+
+    assert summary.checkpoint_summary.work_units_updated == 1
+    assert summary.materialization_counts["intents_reused"] == 1
+    assert summary.materialization_counts["executions_reused"] == 1
+    assert summary.materialization_counts["position_legs_inserted"] == 1
+    assert summary.materialization_counts["carry_rows_inserted"] == 2
+    assert summary.materialization_counts["exit_rows_inserted"] == 1
+    with duckdb.connect(str(trade_path), read_only=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM trade_position_leg").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM trade_carry_snapshot").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM trade_exit_execution").fetchone()[0] == 1
+
+
 def test_trade_source_reads_stock_daily_adjusted_code_trade_date(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
     _write_stock_daily_adjusted(
@@ -491,4 +614,18 @@ def _update_admitted_weight(database_path: Path, *, plan_snapshot_nk: str, admit
             WHERE plan_snapshot_nk = ?
             """,
             [admitted_weight, admitted_weight, plan_snapshot_nk],
+        )
+
+
+def _reset_trade_to_legacy_shape(database_path: Path, *, last_run_id: str) -> None:
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute("DELETE FROM trade_position_leg")
+        connection.execute("DELETE FROM trade_carry_snapshot")
+        connection.execute("DELETE FROM trade_exit_execution")
+        connection.execute(
+            """
+            UPDATE trade_checkpoint
+            SET last_run_id = ?, updated_at = CURRENT_TIMESTAMP
+            """,
+            [last_run_id],
         )

@@ -11,23 +11,24 @@
 ## 验收口径
 
 - 治理面板只允许使用 `待测 / 放行 / 冻结 / 待修` 四种状态。
-- 每个模块都要登记 `当前状态 / 最近一次 gate / 下一动作 / 阻断原因`。
+- 每个模块都要登记 `当前状态 / 最近一次 gate / 下一动作 / 阻塞原因`。
 - 同一时刻只允许一个活跃修复模块。
-- `pipeline` 不得被用于反推业务模块已经健康。
-- 本轮治理面板必须明确：
-  - 当前活跃模块是 `portfolio_plan`
-  - `position` 维持 `放行`
-  - `portfolio_plan` 当前判定只允许写到 `放行` 或 `待修`
+- `pipeline` 不得被用来反推业务模块已经健康。
+- 当前治理口径必须明确：
+  - `position = 放行`
+  - `portfolio_plan = 放行`
+  - `trade = 待修`
+  - `system` 继续等待 `trade` 放行
 
 ## 治理面板快照
 
-| 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻断原因/备注 |
+| 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻塞原因/备注 |
 | --- | --- | --- | --- | --- |
-| `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `portfolio_plan` 验证是否反向打破 | 已完成 stage-seventeen live cutover，本轮不写 `冻结` |
-| `portfolio_plan` | `待修` | `2026-04-22 portfolio_plan live preflight` | 做 stage-seventeen live gate 与正式重跑 | 最新正式 run 仍停在 `portfolio_gross_cap_weight = 0.15`，未完成 live active-cap cutover |
-| `trade` | `待测` | `stage-five engineering closeout` | 等待 `portfolio_plan` 放行后进入 | 需验证 `open + carry + full-exit` 正式落表 |
-| `system` | `待测` | `stage-six engineering closeout` | 等待 `trade` 放行后进入 | 需验证只读 `trade` 的 rolling readout |
-| `pipeline` | `待测` | `stage-sixteen incremental resume` | 等待下游业务模块放行后进入 | 只做 orchestration gate，不反推主线健康 |
+| `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `trade` gate | 已完成 live cutover，本轮不写 `冻结` |
+| `portfolio_plan` | `放行` | `2026-04-22 portfolio_plan Card 50 regate` | 保持正式 `0.50` live snapshot，等待下游 gate | 最新正式 run `portfolio-plan-68ab0db998ad` 已 `completed` |
+| `trade` | `待修` | `2026-04-23 trade Card 51 live freeze gate` | 继续定位 live slow path 无进展 blocker 并重跑正式 gate | 新 run `trade-6f780ccc1005` 已标记 `interrupted`，正式表 / queue / checkpoint 均未推进 |
+| `system` | `待测` | `stage-six engineering closeout` | 等待 `trade` 放行后进入 | `trade` 尚未通过 Card 51，继续冻结 |
+| `pipeline` | `待测` | `stage-sixteen incremental resume` | 等待业务模块放行后验收 | orchestration-only |
 | `alpha` | `待测` | `stage-three closeout` | 后置冻结审计 | 本轮不主动开修 |
 | `malf` | `待测` | `stage-fourteen replay closeout` | 后置冻结审计 | 本轮不主动开修 |
 | `data` | `待测` | `stage-seven engineering closeout` | 后置冻结审计 | 本轮不主动开修 |

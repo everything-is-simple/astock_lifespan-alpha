@@ -303,6 +303,29 @@ def _materialize_trade_sql(
 ) -> tuple[dict[str, int], int, date | None]:
     connection.execute(
         """
+        CREATE OR REPLACE TEMP TABLE trade_source_work_unit_rows AS
+        SELECT
+            portfolio_id,
+            symbol,
+            reference_trade_date,
+            planned_entry_trade_date,
+            candidate_nk,
+            plan_snapshot_nk,
+            md5(
+                CONCAT(
+                    plan_snapshot_nk, '|', candidate_nk, '|',
+                    COALESCE(CAST(reference_trade_date AS VARCHAR), 'None'), '|',
+                    COALESCE(CAST(planned_entry_trade_date AS VARCHAR), 'None'), '|',
+                    COALESCE(CAST(scheduled_exit_trade_date AS VARCHAR), 'None'), '|',
+                    position_action_decision, '|', requested_weight, '|', admitted_weight, '|', trimmed_weight,
+                    '|', plan_status, '|', COALESCE(blocking_reason_code, ''), '|', COALESCE(planned_exit_reason_code, '')
+                )
+            ) AS row_fingerprint
+        FROM trade_plan_source_rows
+        """
+    )
+    connection.execute(
+        """
         CREATE OR REPLACE TEMP TABLE trade_source_work_unit_summary AS
         SELECT
             portfolio_id,
@@ -311,19 +334,12 @@ def _materialize_trade_sql(
             MAX(reference_trade_date) AS last_reference_trade_date,
             md5(
                 string_agg(
-                    CONCAT(
-                        plan_snapshot_nk, '|', candidate_nk, '|',
-                        COALESCE(CAST(reference_trade_date AS VARCHAR), 'None'), '|',
-                        COALESCE(CAST(planned_entry_trade_date AS VARCHAR), 'None'), '|',
-                        COALESCE(CAST(scheduled_exit_trade_date AS VARCHAR), 'None'), '|',
-                        position_action_decision, '|', requested_weight, '|', admitted_weight, '|', trimmed_weight,
-                        '|', plan_status, '|', COALESCE(blocking_reason_code, ''), '|', COALESCE(planned_exit_reason_code, '')
-                    ),
+                    row_fingerprint,
                     '||'
                     ORDER BY planned_entry_trade_date, candidate_nk, plan_snapshot_nk
                 )
             ) AS source_fingerprint
-        FROM trade_plan_source_rows
+        FROM trade_source_work_unit_rows
         GROUP BY portfolio_id, symbol
         """
     )
@@ -389,7 +405,9 @@ def _materialize_trade_sql(
             requested_weight,
             admitted_weight,
             CASE WHEN trade_blocking_reason_code IS NULL THEN ROUND(admitted_weight, 8) ELSE 0.0 END AS execution_weight,
-            trade_blocking_reason_code AS blocking_reason_code
+            trade_blocking_reason_code AS blocking_reason_code,
+            scheduled_exit_trade_date,
+            planned_exit_reason_code
         FROM reasoned
         """,
         [TRADE_CONTRACT_VERSION],
@@ -406,6 +424,7 @@ def _materialize_trade_sql(
                 CASE WHEN blocking_reason_code IS NULL THEN 'filled' ELSE 'rejected' END
             ) AS order_execution_nk,
             intent.order_intent_nk,
+            intent.candidate_nk,
             intent.portfolio_id,
             intent.symbol,
             CASE WHEN intent.blocking_reason_code IS NULL THEN 'filled' ELSE 'rejected' END AS execution_status,
@@ -424,63 +443,47 @@ def _materialize_trade_sql(
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE trade_materialized_exit_execution AS
-        WITH exit_candidates AS (
-            SELECT
-                plan.plan_snapshot_nk,
-                plan.candidate_nk,
-                plan.portfolio_id,
-                plan.symbol,
-                plan.admitted_weight,
-                plan.scheduled_exit_trade_date,
-                plan.planned_exit_reason_code,
-                entry.execution_status AS entry_execution_status,
-                price.trade_date AS exit_trade_date,
-                price.open_price AS execution_price
-            FROM trade_plan_source_rows AS plan
-            LEFT JOIN trade_materialized_execution AS entry
-                ON entry.order_intent_nk LIKE CONCAT(plan.portfolio_id, ':', plan.candidate_nk, ':%')
-            LEFT JOIN trade_execution_price_source AS price
-                ON price.symbol = plan.symbol
-                AND price.trade_date = plan.scheduled_exit_trade_date
-            WHERE plan.admitted_weight > 0
-                AND plan.scheduled_exit_trade_date IS NOT NULL
-        )
         SELECT
             CONCAT(
-                portfolio_id,
+                intent.portfolio_id,
                 ':',
-                candidate_nk,
+                intent.candidate_nk,
                 ':exit:',
-                COALESCE(CAST(scheduled_exit_trade_date AS VARCHAR), 'no_exit_date'),
+                COALESCE(CAST(intent.scheduled_exit_trade_date AS VARCHAR), 'no_exit_date'),
                 ':',
                 ?
             ) AS exit_execution_nk,
-            CONCAT(portfolio_id, ':', candidate_nk, ':leg') AS position_leg_nk,
-            candidate_nk,
-            portfolio_id,
-            symbol,
-            scheduled_exit_trade_date AS exit_trade_date,
+            CONCAT(intent.portfolio_id, ':', intent.candidate_nk, ':leg') AS position_leg_nk,
+            intent.candidate_nk,
+            intent.portfolio_id,
+            intent.symbol,
+            intent.scheduled_exit_trade_date AS exit_trade_date,
             CASE
-                WHEN entry_execution_status != 'filled' THEN 'rejected'
+                WHEN intent.blocking_reason_code IS NOT NULL THEN 'rejected'
                 WHEN exit_trade_date IS NULL THEN 'rejected'
-                WHEN execution_price IS NULL THEN 'rejected'
+                WHEN price.open_price IS NULL THEN 'rejected'
                 ELSE 'filled'
             END AS execution_status,
-            execution_price,
+            price.open_price AS execution_price,
             CASE
-                WHEN entry_execution_status = 'filled' AND exit_trade_date IS NOT NULL AND execution_price IS NOT NULL
-                    THEN ROUND(admitted_weight, 8)
+                WHEN intent.blocking_reason_code IS NULL AND exit_trade_date IS NOT NULL AND price.open_price IS NOT NULL
+                    THEN ROUND(intent.admitted_weight, 8)
                 ELSE 0.0
             END AS exited_weight,
             CASE
-                WHEN entry_execution_status != 'filled' THEN 'entry_not_filled'
+                WHEN intent.blocking_reason_code IS NOT NULL THEN 'entry_not_filled'
                 WHEN exit_trade_date IS NULL THEN 'missing_exit_execution_trade_date'
-                WHEN execution_price IS NULL THEN 'missing_execution_open_price'
+                WHEN price.open_price IS NULL THEN 'missing_execution_open_price'
                 ELSE NULL
             END AS blocking_reason_code,
-            planned_exit_reason_code AS exit_reason_code,
+            intent.planned_exit_reason_code AS exit_reason_code,
             ? AS source_price_line
-        FROM exit_candidates
+        FROM trade_materialized_intent AS intent
+        LEFT JOIN trade_execution_price_source AS price
+            ON price.symbol = intent.symbol
+            AND price.trade_date = intent.scheduled_exit_trade_date
+        WHERE intent.admitted_weight > 0
+            AND intent.scheduled_exit_trade_date IS NOT NULL
         """,
         [TRADE_CONTRACT_VERSION, EXECUTION_PRICE_LINE],
     )
@@ -497,7 +500,7 @@ def _materialize_trade_sql(
             execution.execution_trade_date AS entry_trade_date,
             execution.execution_price AS entry_execution_price,
             intent.execution_weight AS position_weight,
-            plan.scheduled_exit_trade_date,
+            intent.scheduled_exit_trade_date,
             CASE
                 WHEN execution.execution_status != 'filled' THEN 'entry_rejected'
                 WHEN exit_execution.execution_status = 'filled' THEN 'closed'
@@ -515,10 +518,9 @@ def _materialize_trade_sql(
         FROM trade_materialized_intent AS intent
         INNER JOIN trade_materialized_execution AS execution
             ON execution.order_intent_nk = intent.order_intent_nk
-        INNER JOIN trade_plan_source_rows AS plan
-            ON plan.candidate_nk = intent.candidate_nk
         LEFT JOIN trade_materialized_exit_execution AS exit_execution
-            ON exit_execution.candidate_nk = intent.candidate_nk
+            ON exit_execution.portfolio_id = intent.portfolio_id
+            AND exit_execution.candidate_nk = intent.candidate_nk
         WHERE intent.admitted_weight > 0
         """
     )
@@ -866,6 +868,31 @@ def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: st
             "source_price_line",
         ],
     )
+    _create_work_unit_change_summary(
+        connection=connection,
+        action_table_name="trade_materialized_intent_with_action",
+        summary_table_name="trade_intent_work_unit_change_summary",
+    )
+    _create_work_unit_change_summary(
+        connection=connection,
+        action_table_name="trade_materialized_execution_with_action",
+        summary_table_name="trade_execution_work_unit_change_summary",
+    )
+    _create_work_unit_change_summary(
+        connection=connection,
+        action_table_name="trade_materialized_position_leg_with_action",
+        summary_table_name="trade_position_leg_work_unit_change_summary",
+    )
+    _create_work_unit_change_summary(
+        connection=connection,
+        action_table_name="trade_materialized_carry_snapshot_with_action",
+        summary_table_name="trade_carry_work_unit_change_summary",
+    )
+    _create_work_unit_change_summary(
+        connection=connection,
+        action_table_name="trade_materialized_exit_execution_with_action",
+        summary_table_name="trade_exit_work_unit_change_summary",
+    )
     connection.execute(
         """
         CREATE OR REPLACE TEMP TABLE trade_work_unit_actions AS
@@ -876,32 +903,30 @@ def _classify_trade_actions(*, connection: duckdb.DuckDBPyConnection, run_id: st
             summary.last_reference_trade_date,
             summary.source_fingerprint,
             CASE
-                WHEN SUM(CASE WHEN intent.materialization_action != 'reused' THEN 1 ELSE 0 END) = 0
-                    AND SUM(CASE WHEN execution.materialization_action != 'reused' THEN 1 ELSE 0 END) = 0
-                    AND SUM(CASE WHEN leg.materialization_action != 'reused' THEN 1 ELSE 0 END) = 0
-                    AND SUM(CASE WHEN carry.materialization_action != 'reused' THEN 1 ELSE 0 END) = 0
-                    AND SUM(CASE WHEN exit_execution.materialization_action != 'reused' THEN 1 ELSE 0 END) = 0
+                WHEN COALESCE(intent.changed_row_count, 0) = 0
+                    AND COALESCE(execution.changed_row_count, 0) = 0
+                    AND COALESCE(leg.changed_row_count, 0) = 0
+                    AND COALESCE(carry.changed_row_count, 0) = 0
+                    AND COALESCE(exit_execution.changed_row_count, 0) = 0
                     THEN 'reused'
                 ELSE 'completed'
             END AS status
         FROM trade_source_work_unit_summary AS summary
-        LEFT JOIN trade_materialized_intent_with_action AS intent
+        LEFT JOIN trade_intent_work_unit_change_summary AS intent
             ON intent.portfolio_id = summary.portfolio_id
             AND intent.symbol = summary.symbol
-        LEFT JOIN trade_materialized_execution_with_action AS execution
+        LEFT JOIN trade_execution_work_unit_change_summary AS execution
             ON execution.portfolio_id = summary.portfolio_id
             AND execution.symbol = summary.symbol
-        LEFT JOIN trade_materialized_position_leg_with_action AS leg
+        LEFT JOIN trade_position_leg_work_unit_change_summary AS leg
             ON leg.portfolio_id = summary.portfolio_id
             AND leg.symbol = summary.symbol
-        LEFT JOIN trade_materialized_carry_snapshot_with_action AS carry
+        LEFT JOIN trade_carry_work_unit_change_summary AS carry
             ON carry.portfolio_id = summary.portfolio_id
             AND carry.symbol = summary.symbol
-        LEFT JOIN trade_materialized_exit_execution_with_action AS exit_execution
+        LEFT JOIN trade_exit_work_unit_change_summary AS exit_execution
             ON exit_execution.portfolio_id = summary.portfolio_id
             AND exit_execution.symbol = summary.symbol
-        GROUP BY summary.portfolio_id, summary.symbol, summary.source_row_count,
-            summary.last_reference_trade_date, summary.source_fingerprint
         """
     )
 
@@ -948,6 +973,25 @@ def _action_counts(*, connection: duckdb.DuckDBPyConnection, table_name: str) ->
     }
 
 
+def _create_work_unit_change_summary(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    action_table_name: str,
+    summary_table_name: str,
+) -> None:
+    connection.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE {summary_table_name} AS
+        SELECT
+            portfolio_id,
+            symbol,
+            SUM(CASE WHEN materialization_action != 'reused' THEN 1 ELSE 0 END) AS changed_row_count
+        FROM {action_table_name}
+        GROUP BY portfolio_id, symbol
+        """
+    )
+
+
 def _trade_checkpoint_fast_path_available(*, connection: duckdb.DuckDBPyConnection) -> bool:
     row = connection.execute(
         """
@@ -990,8 +1034,54 @@ def _trade_checkpoint_fast_path_available(*, connection: duckdb.DuckDBPyConnecti
             AND source.symbol = execution.symbol
         """
     ).fetchone()[0]
-    return int(intent_count) == int(execution_count) == int(
-        connection.execute("SELECT SUM(source_row_count) FROM trade_source_work_unit_summary").fetchone()[0] or 0
+    expected_intent_count = int(connection.execute("SELECT SUM(source_row_count) FROM trade_source_work_unit_summary").fetchone()[0] or 0)
+    if int(intent_count) != int(execution_count) or int(intent_count) != expected_intent_count:
+        return False
+    actionable_row_count, exit_row_count = connection.execute(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE admitted_weight > 0),
+            COUNT(*) FILTER (WHERE admitted_weight > 0 AND scheduled_exit_trade_date IS NOT NULL)
+        FROM trade_plan_source_rows
+        """
+    ).fetchone()
+    position_leg_count = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM trade_position_leg AS leg
+        INNER JOIN trade_plan_source_rows AS source
+            ON source.portfolio_id = leg.portfolio_id
+            AND source.candidate_nk = leg.candidate_nk
+        WHERE source.admitted_weight > 0
+        """
+    ).fetchone()[0]
+    exit_execution_count = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM trade_exit_execution AS exit_execution
+        INNER JOIN trade_plan_source_rows AS source
+            ON source.portfolio_id = exit_execution.portfolio_id
+            AND source.candidate_nk = exit_execution.candidate_nk
+        WHERE source.admitted_weight > 0
+            AND source.scheduled_exit_trade_date IS NOT NULL
+        """
+    ).fetchone()[0]
+    carry_snapshot_count = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM trade_carry_snapshot AS carry
+        INNER JOIN trade_position_leg AS leg
+            ON leg.position_leg_nk = carry.position_leg_nk
+        INNER JOIN trade_plan_source_rows AS source
+            ON source.portfolio_id = leg.portfolio_id
+            AND source.candidate_nk = leg.candidate_nk
+        WHERE source.admitted_weight > 0
+        """
+    ).fetchone()[0]
+    return (
+        int(position_leg_count) == int(actionable_row_count or 0)
+        and int(exit_execution_count) == int(exit_row_count or 0)
+        and int(carry_snapshot_count) == int((actionable_row_count or 0) + (exit_row_count or 0))
     )
 
 
