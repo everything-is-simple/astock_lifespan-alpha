@@ -26,6 +26,33 @@ class SystemSchemaRepairSummary:
         }
 
 
+def _system_readout_row_signature_sql(*, row_alias: str) -> str:
+    return f"""
+        hash(
+            {row_alias}.system_readout_nk,
+            {row_alias}.order_intent_nk,
+            {row_alias}.order_execution_nk,
+            {row_alias}.portfolio_id,
+            {row_alias}.symbol,
+            {row_alias}.reference_trade_date,
+            {row_alias}.planned_trade_date,
+            {row_alias}.execution_trade_date,
+            {row_alias}.trade_action,
+            {row_alias}.position_leg_nk,
+            {row_alias}.position_action_decision,
+            {row_alias}.intent_status,
+            {row_alias}.execution_status,
+            {row_alias}.requested_weight,
+            {row_alias}.admitted_weight,
+            {row_alias}.execution_weight,
+            {row_alias}.executed_weight,
+            {row_alias}.execution_price,
+            {row_alias}.blocking_reason_code,
+            {row_alias}.source_price_line
+        )
+    """
+
+
 def repair_system_schema(*, settings: WorkspaceRoots | None = None) -> SystemSchemaRepairSummary:
     workspace = settings or default_settings()
     workspace.ensure_directories()
@@ -33,9 +60,10 @@ def repair_system_schema(*, settings: WorkspaceRoots | None = None) -> SystemSch
     initialize_system_schema(target_path)
     checkpoint_rows_backfilled = 0
     with duckdb.connect(str(target_path)) as connection:
+        row_signature = _system_readout_row_signature_sql(row_alias="readout")
         checkpoint_rows_backfilled = int(
             connection.execute(
-                """
+                f"""
                 INSERT INTO system_checkpoint (
                     portfolio_id,
                     symbol,
@@ -48,50 +76,12 @@ def repair_system_schema(*, settings: WorkspaceRoots | None = None) -> SystemSch
                     readout.portfolio_id,
                     readout.symbol,
                     MAX(readout.execution_trade_date),
-                    md5(
-                        string_agg(
-                            CONCAT(
-                                readout.order_intent_nk,
-                                '|',
-                                readout.order_execution_nk,
-                                '|',
-                                readout.portfolio_id,
-                                '|',
-                                readout.symbol,
-                                '|',
-                                COALESCE(CAST(readout.reference_trade_date AS VARCHAR), ''),
-                                '|',
-                                COALESCE(CAST(readout.planned_trade_date AS VARCHAR), ''),
-                                '|',
-                                COALESCE(CAST(readout.execution_trade_date AS VARCHAR), ''),
-                                '|',
-                                readout.trade_action,
-                                '|',
-                                COALESCE(readout.position_leg_nk, ''),
-                                '|',
-                                readout.position_action_decision,
-                                '|',
-                                readout.intent_status,
-                                '|',
-                                readout.execution_status,
-                                '|',
-                                CAST(readout.requested_weight AS VARCHAR),
-                                '|',
-                                CAST(readout.admitted_weight AS VARCHAR),
-                                '|',
-                                CAST(readout.execution_weight AS VARCHAR),
-                                '|',
-                                CAST(readout.executed_weight AS VARCHAR),
-                                '|',
-                                COALESCE(CAST(readout.execution_price AS VARCHAR), ''),
-                                '|',
-                                COALESCE(readout.blocking_reason_code, ''),
-                                '|',
-                                readout.source_price_line
-                            )
-                            ORDER BY readout.execution_trade_date, readout.order_execution_nk
-                        )
-                    ),
+                    CAST(hash(
+                        COUNT(*),
+                        MAX(readout.execution_trade_date),
+                        bit_xor({row_signature}),
+                        SUM({row_signature})
+                    ) AS VARCHAR),
                     MAX(readout.last_materialized_run_id),
                     CURRENT_TIMESTAMP
                 FROM system_trade_readout AS readout

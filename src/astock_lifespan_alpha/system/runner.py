@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 import duckdb
@@ -30,6 +32,30 @@ class _SystemTradeSourceMetadata:
     source_available: bool
 
 
+def _table_row_count(*, connection: duckdb.DuckDBPyConnection, table_name: str) -> int:
+    return int(connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] or 0)
+
+
+def _record_system_phase(
+    *,
+    connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    phase: str,
+    started_at: float,
+    table_name: str | None = None,
+    detail: str | None = None,
+) -> str:
+    parts = [phase, f"elapsed_seconds={perf_counter() - started_at:.6f}"]
+    if table_name is not None:
+        parts.append(f"rows={_table_row_count(connection=connection, table_name=table_name)}")
+    if detail:
+        parts.append(detail)
+    message = "system phase " + " ".join(parts)
+    connection.execute("UPDATE system_run SET message = ? WHERE run_id = ?", [message, run_id])
+    print(message, file=sys.stderr, flush=True)
+    return message
+
+
 def run_system_from_trade(
     *,
     portfolio_id: str = "core",
@@ -49,6 +75,7 @@ def run_system_from_trade(
     latest_execution_trade_date: date | None = None
 
     with duckdb.connect(str(target_path)) as connection:
+        phase_started = perf_counter()
         source = _attach_system_trade_source_view(connection=connection, workspace=workspace, portfolio_id=portfolio_id)
         connection.execute(
             """
@@ -62,21 +89,56 @@ def run_system_from_trade(
                 str(source.trade_source_path) if source.trade_source_path is not None else None,
             ],
         )
+        message = _record_system_phase(
+            connection=connection,
+            run_id=run_id,
+            phase="source_attached",
+            started_at=phase_started,
+            table_name="system_trade_source_rows" if source.row_count else None,
+            detail=f"work_units={source.work_unit_count}",
+        )
 
         try:
             connection.execute("DELETE FROM system_work_queue")
             if source.row_count:
+                phase_started = perf_counter()
                 _create_system_source_work_unit_summary(connection=connection)
+                message = _record_system_phase(
+                    connection=connection,
+                    run_id=run_id,
+                    phase="work_unit_summary_ready",
+                    started_at=phase_started,
+                    table_name="system_source_work_unit_summary",
+                    detail=f"source_rows={source.row_count}",
+                )
                 if _system_checkpoint_fast_path_available(connection=connection):
+                    phase_started = perf_counter()
                     work_units_updated, latest_execution_trade_date = _record_reused_system_sql(
                         connection=connection,
                         run_id=run_id,
                     )
+                    message = _record_system_phase(
+                        connection=connection,
+                        run_id=run_id,
+                        phase="write_reused_tracking_committed",
+                        started_at=phase_started,
+                        table_name="system_work_queue",
+                        detail="work_units_updated=0",
+                    )
                 else:
+                    phase_started = perf_counter()
                     work_units_updated, latest_execution_trade_date = _materialize_system_sql(
                         connection=connection,
                         run_id=run_id,
                         portfolio_id=portfolio_id,
+                    )
+                    message = _record_system_phase(
+                        connection=connection,
+                        run_id=run_id,
+                        phase="write_materialized_committed",
+                        started_at=phase_started,
+                        table_name="system_trade_readout",
+                        detail=f"work_units_updated={work_units_updated}",
                     )
                 summary_rows = int(
                     connection.execute(
@@ -107,6 +169,14 @@ def run_system_from_trade(
                     message,
                     run_id,
                 ],
+            )
+            message = _record_system_phase(
+                connection=connection,
+                run_id=run_id,
+                phase="system_run_completed",
+                started_at=phase_started,
+                table_name="system_portfolio_trade_summary" if summary_rows else None,
+                detail=f"readout_rows={source.row_count}",
             )
         except Exception as exc:
             connection.execute(
@@ -233,62 +303,50 @@ def _attach_system_trade_source_view(
     )
 
 
+def _system_source_row_signature_sql(*, row_alias: str) -> str:
+    return f"""
+        hash(
+            {row_alias}.system_readout_nk,
+            {row_alias}.order_intent_nk,
+            {row_alias}.order_execution_nk,
+            {row_alias}.portfolio_id,
+            {row_alias}.symbol,
+            {row_alias}.reference_trade_date,
+            {row_alias}.planned_trade_date,
+            {row_alias}.execution_trade_date,
+            {row_alias}.trade_action,
+            {row_alias}.position_leg_nk,
+            {row_alias}.position_action_decision,
+            {row_alias}.intent_status,
+            {row_alias}.execution_status,
+            {row_alias}.requested_weight,
+            {row_alias}.admitted_weight,
+            {row_alias}.execution_weight,
+            {row_alias}.executed_weight,
+            {row_alias}.execution_price,
+            {row_alias}.blocking_reason_code,
+            {row_alias}.source_price_line
+        )
+    """
+
+
 def _create_system_source_work_unit_summary(*, connection: duckdb.DuckDBPyConnection) -> None:
+    row_signature = _system_source_row_signature_sql(row_alias="source")
     connection.execute(
-        """
+        f"""
         CREATE OR REPLACE TEMP TABLE system_source_work_unit_summary AS
         SELECT
             portfolio_id,
             symbol,
             COUNT(*) AS source_row_count,
             MAX(execution_trade_date) AS latest_execution_trade_date,
-            md5(
-                string_agg(
-                    CONCAT(
-                        system_readout_nk,
-                        '|',
-                        COALESCE(order_intent_nk, ''),
-                        '|',
-                        order_execution_nk,
-                        '|',
-                        portfolio_id,
-                        '|',
-                        symbol,
-                        '|',
-                        COALESCE(CAST(reference_trade_date AS VARCHAR), ''),
-                        '|',
-                        COALESCE(CAST(planned_trade_date AS VARCHAR), ''),
-                        '|',
-                        COALESCE(CAST(execution_trade_date AS VARCHAR), ''),
-                        '|',
-                        trade_action,
-                        '|',
-                        COALESCE(position_leg_nk, ''),
-                        '|',
-                        position_action_decision,
-                        '|',
-                        intent_status,
-                        '|',
-                        execution_status,
-                        '|',
-                        CAST(requested_weight AS VARCHAR),
-                        '|',
-                        CAST(admitted_weight AS VARCHAR),
-                        '|',
-                        CAST(execution_weight AS VARCHAR),
-                        '|',
-                        CAST(executed_weight AS VARCHAR),
-                        '|',
-                        COALESCE(CAST(execution_price AS VARCHAR), ''),
-                        '|',
-                        COALESCE(blocking_reason_code, ''),
-                        '|',
-                        source_price_line
-                    )
-                    ORDER BY execution_trade_date, order_execution_nk
-                )
-            ) AS source_fingerprint
-        FROM system_trade_source_rows
+            CAST(hash(
+                COUNT(*),
+                MAX(execution_trade_date),
+                bit_xor({row_signature}),
+                SUM({row_signature})
+            ) AS VARCHAR) AS source_fingerprint
+        FROM system_trade_source_rows AS source
         GROUP BY portfolio_id, symbol
         """
     )

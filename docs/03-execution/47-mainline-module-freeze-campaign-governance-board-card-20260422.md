@@ -18,17 +18,18 @@
   - `position = 放行`
   - `portfolio_plan = 放行`
   - `trade = 放行`
-- `system` 可以作为下一活跃模块进入 live freeze gate
+  - `system = 放行`
+- `pipeline` 可以作为下一活跃模块进入 live freeze gate
 
 ## 治理面板快照
 
 | 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻塞原因/备注 |
 | --- | --- | --- | --- | --- |
-| `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `system` gate | 已完成 live cutover，本轮不写 `冻结` |
+| `position` | `放行` | `2026-04-22 position live freeze gate` | 等待 `pipeline` gate | 已完成 live cutover，本轮不写 `冻结` |
 | `portfolio_plan` | `放行` | `2026-04-22 portfolio_plan Card 50 regate` | 保持正式 `0.50` live snapshot，等待下游 gate | 最新正式 run `portfolio-plan-68ab0db998ad` 已 `completed` |
-| `trade` | `放行` | `2026-04-23 trade Card 54 commit cutover` | 等待 `system` gate | 最新正式 run `trade-558802e7f7a4` 已 `completed`，短事务 cutover 已通过 |
-| `system` | `待测` | `stage-six engineering closeout` | 进入 live freeze gate | `trade` 已放行，下一活跃模块切到 `system` |
-| `pipeline` | `待测` | `stage-sixteen incremental resume` | 等待业务模块放行后验收 | orchestration-only |
+| `trade` | `放行` | `2026-04-23 trade Card 54 commit cutover` | 等待 `pipeline` gate | 最新正式 run `trade-558802e7f7a4` 已 `completed`，短事务 cutover 已通过 |
+| `system` | `放行` | `2026-04-23 system Card 55 live freeze gate` | 等待 `pipeline` gate | 最新正式 run `system-080b8ac3bf8d` 已 `completed`，readout 已包含 `open_entry / full_exit` |
+| `pipeline` | `待测` | `stage-sixteen incremental resume` | 进入 live freeze gate | orchestration-only，下一活跃模块 |
 | `alpha` | `待测` | `stage-three closeout` | 后置冻结审计 | 本轮不主动开修 |
 | `malf` | `待测` | `stage-fourteen replay closeout` | 后置冻结审计 | 本轮不主动开修 |
 | `data` | `待测` | `stage-seven engineering closeout` | 后置冻结审计 | 本轮不主动开修 |

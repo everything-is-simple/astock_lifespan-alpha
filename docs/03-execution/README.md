@@ -235,3 +235,17 @@ Stage-five implementation defaults are frozen for engineering:
 - 正式库无 staging / backup 残留表，secondary indexes 已恢复
 - `trade` 改为 `放行`
 - 下一活跃模块切到 `system`
+
+## Card 55 addendum
+
+- `55` system live freeze gate 已登记
+- 首次 run `system-2bebfbed66cb` 已标记为 `interrupted`
+- `system` source fingerprint 慢路径已改为 aggregate hash
+- `system` runner 已补齐 phase-level stderr/message
+- 第二次正式 run `system-080b8ac3bf8d` 已 `completed`
+- `system_trade_readout = 5902368`
+- `open_entry = 5892934`
+- `full_exit = 9434`
+- `system_checkpoint.last_run_id` 已全量切到 `system-080b8ac3bf8d`
+- `system` 改为 `放行`
+- 下一活跃模块切到 `pipeline`

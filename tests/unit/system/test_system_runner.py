@@ -53,6 +53,7 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
     assert isinstance(summary, SystemRunSummary)
     assert summary.runner_name == "run_system_from_trade"
     assert summary.status == "completed"
+    assert "system_run_completed" in summary.message
     assert summary.readout_rows == 2
     assert summary.summary_rows == 1
     assert summary.checkpoint_summary.work_units_seen == 2
@@ -80,6 +81,10 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
             FROM system_portfolio_trade_summary
             """
         ).fetchone()
+        run_message = connection.execute(
+            "SELECT message FROM system_run WHERE run_id = ?",
+            [summary.run_id],
+        ).fetchone()[0]
 
     assert readout == [
         ("intent:filled", "execution:filled", "core", "AAA", "filled", 0.10, None, "stage6_system_v2"),
@@ -95,6 +100,7 @@ def test_system_runner_materializes_trade_readout_and_summary(monkeypatch, tmp_p
         ),
     ]
     assert summary_row == ("core", 1, 0, 1, 2, 1, 1, 2, 0.10, date(2026, 1, 4), "stage6_system_v2")
+    assert "system_run_completed" in run_message
 
 
 def test_system_runner_handles_missing_trade_database(monkeypatch, tmp_path):
