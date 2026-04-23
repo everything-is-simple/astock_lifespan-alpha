@@ -328,3 +328,14 @@ Stage-five engineering defaults are frozen:
 - 本轮只修改 `engine.py` 与 `test_engine.py`，不进入 `runner / build / queue / checkpoint / schema`
 - MALF 相关单测通过：`25 passed`
 - live semantic audit 已复跑，但因 formal ledger 未重算，结论仍停留在 Card 58 的旧 run 结果
+
+## Card 60 补充
+
+- `60` MALF day live formal rebuild 与 Stage 19 重验收已登记
+- 当前结论：`已记录阻塞，live formal gate 未通过`
+- 本轮 `--no-resume` rebuild 生成 `day-107059a919fc`，但停在 stale `running`
+- 实际失败路径不是 `.building.duckdb` promotion，而是 target 直写后卡死
+- `day-107059a919fc` 已正式改为 `interrupted`
+- 本轮遗留的 `25` 条 `running queue` 已改为 `interrupted`
+- 当前 `malf_day.duckdb` 已混入 interrupted run 局部 rows，`malf_checkpoint` 也已成为混合 `last_run_id`
+- 下一张卡必须先恢复 formal target，再允许重新发起 `day` rebuild

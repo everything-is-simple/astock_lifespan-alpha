@@ -302,3 +302,15 @@ Stage-five implementation defaults are frozen for engineering:
 - 新增 `reborn` 连续窗口、确认式 `guard`、四区 `zone` 覆盖测试
 - MALF 相关单测：`25 passed`
 - live semantic audit 已复跑，但因 formal ledger 未重算，当前 `malf` live formal gate 不前移
+
+## Card 60 addendum
+
+- `60` MALF day live formal rebuild 与 Stage 19 重验收已登记
+- 结论：`docs/03-execution/60-malf-day-live-formal-regate-conclusion-20260423.md`
+- 本轮本地门通过：`25 passed`
+- 新 run `day-107059a919fc` 已发起，但停在 stale `running`
+- 失败路径是 target 直写卡死，而不是 `.building.duckdb` promotion 失败后回收
+- `day-107059a919fc` 已正式标记为 `interrupted`
+- 该 run 遗留的 `25` 条 `running queue` 已全部改为 `interrupted`
+- 当前 `malf_day.duckdb` 已混入 interrupted run 局部 ledger rows，`malf_checkpoint` 已变成混合 `last_run_id`
+- 本轮不继续 forced audit；下一张卡必须先恢复 formal target

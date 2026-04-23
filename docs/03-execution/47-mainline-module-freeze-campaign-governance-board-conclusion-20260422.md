@@ -33,3 +33,26 @@
 | `alpha` | `待测` | `stage-three closeout` | 后置冻结审计 | 本轮不主动开修 |
 | `malf` | `待测` | `stage-fourteen replay closeout` | 后置冻结审计 | 本轮不主动开修 |
 | `data` | `待测` | `stage-seven engineering closeout` | 后置冻结审计 | 本轮不主动开修 |
+
+## Card 60 addendum
+
+截至 Card 60 blocker 收口，治理面板对上游审计链路补充如下：
+
+- `alpha = 放行`
+- `malf = 待修`
+- 当前唯一需要先处理的上游模块为 `malf`
+
+Card 60 的正式判断：
+
+- `day-107059a919fc` 没有形成新的 `completed` formal run
+- 失败路径是 target 直写 stale `running`，不是可接受的 `.building.duckdb -> promote` 路径
+- `day-107059a919fc` 已标记为 `interrupted`
+- 本轮遗留的 `25` 条 `running queue` 已改为 `interrupted`
+- 当前 `malf_day.duckdb` 已混入 interrupted run 局部 rows，`malf_checkpoint` 也已成为混合 `last_run_id`
+
+因此面板状态更新为：
+
+| 模块 | 当前状态 | 最近一次 gate | 下一动作 | 阻塞原因/备注 |
+| --- | --- | --- | --- | --- |
+| `alpha` | `放行` | `2026-04-23 alpha live freeze audit` | 保持正式 producer 输出 | Card 57 已通过 |
+| `malf` | `待修` | `2026-04-23 Card 60 live formal rebuild regate` | 先恢复 formal target，再重发 `day` rebuild | `day-107059a919fc` stale `running` 后留下 interrupted rows 与 mixed checkpoint provenance |

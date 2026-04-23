@@ -354,3 +354,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/59-malf-day-engine-semantic-repair-conclusion-20260423.md`
 - 裁决：`已记录，代码落地；live formal gate 待重算`
 - 说明：Card 59 已完成 `engine.py` 的纯语义状态机修复，并新增 `reborn` 连续窗口、确认式 `guard`、四区 `zone` 覆盖单测；MALF 相关单测 `25 passed`。同时复跑了 `audit_malf_day_semantics`，但由于本轮未进入 live build，formal ledger 仍是旧 run 物化结果，因此 live formal gate 结论未从 Card 58 前移。
+
+### `60` MALF day live formal rebuild 与 Stage 19 重验收
+
+- 结论文档：`docs/03-execution/60-malf-day-live-formal-regate-conclusion-20260423.md`
+- 裁决：`已记录阻塞，live formal gate 未通过`
+- 说明：Card 60 已按计划发起 `--no-resume` full-universe rebuild，并生成 `day-107059a919fc`；MALF 本地门 `25 passed`。但本轮 live rebuild 卡死在 target 直写路径，未形成新的 `completed` formal run，且正式库已混入 interrupted run 局部 rows 与混合 checkpoint provenance；因此本轮只将 stale run 及其 `25` 条 running queue 收为 `interrupted`，不继续 forced audit，`malf` 保持待修。
