@@ -249,3 +249,16 @@ Stage-five implementation defaults are frozen for engineering:
 - `system_checkpoint.last_run_id` 已全量切到 `system-080b8ac3bf8d`
 - `system` 改为 `放行`
 - 下一活跃模块切到 `pipeline`
+
+## Card 56 addendum
+
+- `56` pipeline live freeze gate 已登记
+- 正式 run `pipeline-88b35c7e6e8a` 已 `completed`
+- `pipeline_run.step_count = 13`
+- `pipeline_contract_version = stage8_pipeline_v1`
+- 13 个 `pipeline_step_run` 全部 `completed`
+- step 12 = `run_trade_from_portfolio_plan / trade-594d80dfdf1d / completed`
+- step 13 = `run_system_from_trade / system-7d34ce3dad1f / completed`
+- `pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到 `pipeline-88b35c7e6e8a`
+- `pipeline` 改为 `放行`
+- 本轮不反向修改或重判 `trade / system`

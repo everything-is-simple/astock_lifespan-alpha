@@ -277,3 +277,17 @@ Stage-five engineering defaults are frozen:
 - `portfolio_plan` 当前 blocker 已更新为 live `0.50` cutover stall，而不是语义未定义
 - Card 50 之后，`portfolio_plan` 已完成按日分批 slow path 与 progress logging 修复，但 committed replace 尾段仍未在验证窗口内完成
 - 当前批次不宣告 `position` 冻结，只登记 live freeze gate 已通过
+
+## 阶段十七与 pipeline live freeze gate 更新
+
+- `trade` Card 54 结论：`docs/03-execution/54-trade-commit-cutover-conclusion-20260423.md`
+- `system` Card 55 结论：`docs/03-execution/55-system-live-freeze-gate-conclusion-20260423.md`
+- `pipeline` Card 56 结论：`docs/03-execution/56-pipeline-live-freeze-gate-conclusion-20260423.md`
+- 当前 gate 结论：`pipeline = 放行`
+- 最新正式 pipeline run：`pipeline-88b35c7e6e8a`
+- `pipeline_run.step_count = 13`
+- `pipeline_contract_version = stage8_pipeline_v1`
+- step 12 已记录 `trade-594d80dfdf1d`
+- step 13 已记录 `system-7d34ce3dad1f`
+- `pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到 `pipeline-88b35c7e6e8a`
+- 本轮只验收 orchestration，不反向修改或重判 `trade / system`

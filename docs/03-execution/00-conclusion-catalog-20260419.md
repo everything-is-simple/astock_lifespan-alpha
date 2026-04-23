@@ -330,3 +330,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/55-system-live-freeze-gate-conclusion-20260423.md`
 - 裁决：`已接受，system 放行`
 - 说明：Card 55 已完成 `system` 消费 Card 54 正式 `trade` 输出的 live freeze gate；首次 run `system-2bebfbed66cb` 因 source summary 前段无可观测进展被标记为 `interrupted`，随后本轮在 `system` 内修复 fingerprint 慢路径并补 phase 进度，第二次正式 run `system-080b8ac3bf8d` 已 `completed`，`system_trade_readout = 5902368`，其中 `open_entry = 5892934`、`full_exit = 9434`，`system_checkpoint.last_run_id` 已全量切新，因此 `system = 放行`，下一活跃模块切到 `pipeline`。
+
+### `56` pipeline live freeze gate
+
+- 结论文档：`docs/03-execution/56-pipeline-live-freeze-gate-conclusion-20260423.md`
+- 裁决：`已接受，pipeline 放行`
+- 说明：Card 56 已完成 `pipeline` 消费当前已放行业务模块输出的 live freeze gate；最新正式 run `pipeline-88b35c7e6e8a` 已 `completed`，`step_count = 13`，`pipeline_contract_version = stage8_pipeline_v1`，step 12 记录 `trade-594d80dfdf1d`，step 13 记录 `system-7d34ce3dad1f`，`pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到本轮 run；本轮不反向修改或重判 `trade / system`。

@@ -225,3 +225,15 @@ Stage-five implementation defaults are now frozen before engineering work:
 - 最新验证 run：`portfolio-plan-0875345c4aa5`
 - 当前仍未完成最终提交，故 `portfolio_plan = 待修`
 - 下一步固定为：继续压缩 committed replace 尾段后再重跑正式 `0.50` gate
+
+## 阶段十七与 pipeline Card 56 更新
+
+- `pipeline` live freeze gate 结论：`docs/03-execution/56-pipeline-live-freeze-gate-conclusion-20260423.md`
+- 当前 gate 结论：`pipeline = 放行`
+- 最新正式 run：`pipeline-88b35c7e6e8a`
+- `step_count = 13`
+- `pipeline_contract_version = stage8_pipeline_v1`
+- step 12 = `run_trade_from_portfolio_plan / trade-594d80dfdf1d / completed`
+- step 13 = `run_system_from_trade / system-7d34ce3dad1f / completed`
+- `pipeline_step_checkpoint.last_pipeline_run_id` 已全量切到 `pipeline-88b35c7e6e8a`
+- 本轮只验收 pipeline orchestration，不反向修改或重判 `trade / system`
