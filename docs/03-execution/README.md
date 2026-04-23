@@ -280,3 +280,15 @@ Stage-five implementation defaults are frozen for engineering:
 - `alpha` 改为 `放行`
 - legacy delta 已正式登记，但本轮不吸收历史 PAS 因子体系
 - 下一顺序切到 `malf`
+
+## Card 58 addendum
+
+- `58` MALF day semantic revalidation gate 已登记
+- 规格：`docs/02-spec/23-stage-eighteen-malf-day-semantic-revalidation-spec-v1-20260423.md`
+- 结论：`docs/03-execution/58-malf-day-semantic-revalidation-gate-conclusion-20260423.md`
+- requested run = `day-a1c965e1f7a9`
+- effective run = `day-fc56ff5e5441`
+- 7 项硬规则 `passed`
+- 4 项软观察触发 flag
+- 当前 `malf = 部分通过`
+- 下一步只允许进入 `engine` 纯语义修复

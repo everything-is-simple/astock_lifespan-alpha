@@ -342,3 +342,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/57-alpha-live-freeze-audit-conclusion-20260423.md`
 - 裁决：`已接受，alpha 放行`
 - 说明：Card 57 已完成当前 `astock alpha` producer 合同的 live freeze audit；5 个 trigger 与 `alpha_signal` 最新正式 audit runs 均 `completed`，`alpha_signal = 5892934`，`position_run.alpha_source_path` 继续指向正式 `alpha_signal.duckdb`，并且当前 `astock alpha` 与历史 PAS/alpha 体系的差距已作为 legacy delta register 正式登记；本轮不吸收历史 PAS 因子体系，下一顺序切到 `malf`。
+
+### `58` MALF day 纯语义重验 gate
+
+- 结论文档：`docs/03-execution/58-malf-day-semantic-revalidation-gate-conclusion-20260423.md`
+- 裁决：`部分通过`
+- 说明：Card 58 已完成 `day` 周期 MALF 纯语义重验；请求审计 run 为 `day-a1c965e1f7a9`，但该 run 未物化核心账本，因此按规格回落到 `day-fc56ff5e5441`。7 项硬规则全部通过，但 `zone_coverage = 2`、`reborn_median_bar_count = 1.0`、`single_bar_reborn_share = 0.8085`、`guard_churn_p90 = 0.75` 全部触发软观察 flag，因此当前 `malf` 被正式登记为“可审计、可复现、内部自洽的最小骨架”，下一张卡只允许进入 `engine` 纯语义修复。

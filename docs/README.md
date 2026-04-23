@@ -308,3 +308,13 @@ Stage-five engineering defaults are frozen:
 - 当前 `astock alpha` 被正式界定为 trigger ledger producer，而不是完整 PAS scoring engine
 - 历史 PAS/alpha 差距已登记为后续治理入口，但不在本轮吸收
 - 下一顺序切到 `malf`
+
+## 阶段十八与 MALF day 纯语义重验更新
+
+- 新规格：`docs/02-spec/23-stage-eighteen-malf-day-semantic-revalidation-spec-v1-20260423.md`
+- `malf` Card 58 结论：`docs/03-execution/58-malf-day-semantic-revalidation-gate-conclusion-20260423.md`
+- 当前 gate 结论：`malf = 部分通过`
+- 本轮请求审计 run：`day-a1c965e1f7a9`
+- 本轮生效审计 run：`day-fc56ff5e5441`
+- 7 项硬规则全部通过
+- 4 项软观察全部触发 flag，下一步只允许进入 `engine` 纯语义修复
