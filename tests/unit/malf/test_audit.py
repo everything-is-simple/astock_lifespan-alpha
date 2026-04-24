@@ -7,12 +7,14 @@ from pathlib import Path
 import duckdb
 
 from astock_lifespan_alpha.core.paths import default_settings
+import astock_lifespan_alpha.malf.audit as audit_module
 from astock_lifespan_alpha.malf import run_malf_day_build
 from astock_lifespan_alpha.malf.audit import audit_malf_day_semantics
 
 
 def test_malf_day_semantic_audit_writes_reports_and_artifacts(monkeypatch, tmp_path):
     workspace = _configure_workspace(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    monkeypatch.setattr(audit_module, "_MATERIALIZE_SYMBOL_CHUNK_SIZE", 1)
     _write_day_source_bars(
         workspace / "data" / "base" / "market_base.duckdb",
         [
@@ -62,7 +64,13 @@ def test_malf_day_semantic_audit_writes_reports_and_artifacts(monkeypatch, tmp_p
     assert "sample coverage" in markdown
     with duckdb.connect(str(report.artifact_database_path), read_only=True) as connection:
         table_names = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
-        assert {"wave_summary", "state_snapshot_sample", "break_events", "reborn_windows"}.issubset(table_names)
+        assert {
+            "wave_summary",
+            "state_snapshot_sample",
+            "break_events",
+            "reborn_windows",
+            "sample_windows",
+        }.issubset(table_names)
 
 
 def test_malf_day_semantic_audit_tracks_stale_running_rows_without_scoring_them(monkeypatch, tmp_path):

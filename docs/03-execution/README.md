@@ -329,3 +329,14 @@ Stage-five implementation defaults are frozen for engineering:
 - forced audit 已直接命中新 run，未 fallback
 - 7 项硬规则 `passed`
 - 当前 `malf` 剩余问题只剩 `zone_coverage = 3` 软观察
+
+## Card 62 addendum
+
+- `62` MALF 地基 Canon、包入口修复与 zone sampling 收口已登记
+- 规格：`docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
+- 结论：`docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+- `malf/__init__.py` 已移除 `malf.audit` 顶层导入
+- audit 入口改为显式从 `astock_lifespan_alpha.malf.audit` 使用
+- `state_snapshot_sample` 已优先覆盖四个 `wave_position_zone`
+- forced audit `malf-day-semantic-audit-ad35dcbbae62`：7 项硬规则 `pass`，4 项软观察 `ok`
+- 当前 `malf = 放行`

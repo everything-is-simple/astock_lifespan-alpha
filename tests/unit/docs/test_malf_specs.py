@@ -64,3 +64,24 @@ def test_stage_nineteen_spec_freezes_broken_to_ledger_boundary():
 
     for term in required_terms:
         assert term in content
+
+
+def test_malf_foundation_canon_freezes_core_concepts():
+    repo_root = Path(__file__).resolve().parents[3]
+    content = (
+        repo_root / "docs" / "02-spec" / "26-malf-foundation-canon-v1-20260424.md"
+    ).read_text(encoding="utf-8")
+
+    required_terms = [
+        "MALF 不是交易系统",
+        "MALF 不输出买卖动作",
+        "唯一输入是 `price bars`",
+        "`HH / HL / LL / LH / break`",
+        "`new-count × no-new-span × life-state`",
+        "`break != confirmation`",
+        "`reborn -> alive` 必须由新方向正式 `HH / LL` 确认",
+        "`WavePosition = (direction, update-rank, stagnation-rank, life-state)`",
+    ]
+
+    for term in required_terms:
+        assert term in content

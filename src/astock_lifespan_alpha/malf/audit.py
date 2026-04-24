@@ -22,6 +22,7 @@ from matplotlib import pyplot as plt  # noqa: E402
 
 
 _PLOT_CONTEXT_BAR_COUNT = 5
+_MATERIALIZE_SYMBOL_CHUNK_SIZE = 100
 _AUTHORITY_MATERIALS = (
     r"H:\Lifespan-Validated\malf-six\001.png",
     r"H:\Lifespan-Validated\malf-six\002.png",
@@ -423,184 +424,280 @@ def _load_stale_run_summaries(
 
 
 def _materialize_required_tables(*, audit_connection: duckdb.DuckDBPyConnection, run_id: str) -> None:
-    safe_run_id = _sql_quote(run_id)
+    symbols = _load_run_symbols(audit_connection=audit_connection, run_id=run_id)
+    _create_required_table_shells(audit_connection=audit_connection, run_id=run_id)
+    for symbol_chunk in _chunk_symbols(symbols, _MATERIALIZE_SYMBOL_CHUNK_SIZE):
+        _insert_required_table_chunk(
+            audit_connection=audit_connection,
+            run_id=run_id,
+            symbols=symbol_chunk,
+        )
+
+
+def _load_run_symbols(*, audit_connection: duckdb.DuckDBPyConnection, run_id: str) -> tuple[str, ...]:
+    rows = audit_connection.execute(
+        """
+        SELECT DISTINCT symbol
+        FROM live.malf_wave_ledger
+        WHERE run_id = ?
+        ORDER BY symbol
+        """,
+        [run_id],
+    ).fetchall()
+    return tuple(str(row[0]) for row in rows)
+
+
+def _chunk_symbols(symbols: tuple[str, ...], chunk_size: int) -> tuple[tuple[str, ...], ...]:
+    if not symbols:
+        return ()
+    bounded_chunk_size = max(int(chunk_size), 1)
+    return tuple(
+        tuple(symbols[index : index + bounded_chunk_size])
+        for index in range(0, len(symbols), bounded_chunk_size)
+    )
+
+
+def _create_required_table_shells(*, audit_connection: duckdb.DuckDBPyConnection, run_id: str) -> None:
+    schema_symbols = ("__schema_only__",)
     audit_connection.execute(
         f"""
         CREATE OR REPLACE TABLE wave_summary AS
-        WITH snapshot_enriched AS (
-            SELECT
-                symbol,
-                timeframe,
-                wave_id,
-                direction,
-                bar_dt,
-                life_state,
-                guard_price,
-                LAG(guard_price) OVER (
-                    PARTITION BY symbol, timeframe, wave_id
-                    ORDER BY bar_dt
-                ) AS prev_guard_price
-            FROM live.malf_state_snapshot
-            WHERE run_id = '{safe_run_id}'
-        ),
-        snapshot_stats AS (
-            SELECT
-                symbol,
-                timeframe,
-                wave_id,
-                COUNT(*) AS bar_count,
-                SUM(CASE WHEN life_state = 'reborn' THEN 1 ELSE 0 END) AS reborn_bar_count,
-                SUM(
-                    CASE
-                        WHEN prev_guard_price IS NULL THEN 0
-                        WHEN guard_price <> prev_guard_price THEN 1
-                        ELSE 0
-                    END
-                ) AS guard_update_count
-            FROM snapshot_enriched
-            GROUP BY 1, 2, 3
-        )
-        SELECT
-            w.run_id,
-            w.symbol,
-            w.timeframe,
-            w.wave_id,
-            w.direction,
-            w.start_bar_dt,
-            w.end_bar_dt,
-            w.guard_bar_dt,
-            w.guard_price,
-            w.extreme_price,
-            w.new_count,
-            w.no_new_span,
-            w.life_state,
-            COALESCE(snapshot_stats.bar_count, 0) AS bar_count,
-            COALESCE(snapshot_stats.reborn_bar_count, 0) AS reborn_bar_count,
-            COALESCE(snapshot_stats.guard_update_count, 0) AS guard_update_count
-        FROM live.malf_wave_ledger AS w
-        LEFT JOIN snapshot_stats
-            ON snapshot_stats.symbol = w.symbol
-           AND snapshot_stats.timeframe = w.timeframe
-           AND snapshot_stats.wave_id = w.wave_id
-        WHERE w.run_id = '{safe_run_id}'
+        SELECT *
+        FROM ({_build_wave_summary_sql(run_id=run_id, symbols=schema_symbols)}) AS wave_summary_source
+        WHERE FALSE
         """
     )
     audit_connection.execute(
         f"""
         CREATE OR REPLACE TABLE break_events AS
-        WITH ordered AS (
-            SELECT
-                symbol,
-                timeframe,
-                bar_dt,
-                wave_id,
-                direction,
-                life_state,
-                new_count,
-                no_new_span,
-                LAG(wave_id) OVER (
-                    PARTITION BY symbol, timeframe
-                    ORDER BY bar_dt
-                ) AS prev_wave_id,
-                LAG(direction) OVER (
-                    PARTITION BY symbol, timeframe
-                    ORDER BY bar_dt
-                ) AS prev_direction,
-                LAG(life_state) OVER (
-                    PARTITION BY symbol, timeframe
-                    ORDER BY bar_dt
-                ) AS prev_life_state
-            FROM live.malf_state_snapshot
-            WHERE run_id = '{safe_run_id}'
-        ),
-        changes AS (
-            SELECT *
-            FROM ordered
-            WHERE prev_wave_id IS NOT NULL AND wave_id <> prev_wave_id
-        )
-        SELECT
-            changes.symbol,
-            changes.timeframe,
-            changes.bar_dt AS break_dt,
-            changes.prev_wave_id AS old_wave_id,
-            changes.prev_direction AS old_direction,
-            changes.prev_life_state AS old_snapshot_life_state,
-            previous_wave.life_state AS old_wave_terminal_life_state,
-            changes.wave_id AS new_wave_id,
-            changes.direction AS new_direction,
-            changes.life_state AS new_life_state,
-            changes.new_count AS new_wave_new_count,
-            changes.no_new_span AS new_wave_no_new_span,
-            CASE
-                WHEN changes.direction = 'up' THEN 'break_up'
-                ELSE 'break_down'
-            END AS expected_break_pivot_type,
-            pivot_row.pivot_type AS break_pivot_type,
-            pivot_row.price AS break_price
-        FROM changes
-        LEFT JOIN live.malf_wave_ledger AS previous_wave
-            ON previous_wave.wave_id = changes.prev_wave_id
-           AND previous_wave.run_id = '{safe_run_id}'
-        LEFT JOIN live.malf_pivot_ledger AS pivot_row
-            ON pivot_row.run_id = '{safe_run_id}'
-           AND pivot_row.wave_id = changes.prev_wave_id
-           AND pivot_row.bar_dt = changes.bar_dt
-           AND pivot_row.pivot_type = CASE
-               WHEN changes.direction = 'up' THEN 'break_up'
-               ELSE 'break_down'
-           END
+        SELECT *
+        FROM ({_build_break_events_sql(run_id=run_id, symbols=schema_symbols)}) AS break_events_source
+        WHERE FALSE
         """
     )
     audit_connection.execute(
         f"""
         CREATE OR REPLACE TABLE reborn_windows AS
-        WITH grouped AS (
-            SELECT
-                snapshot.symbol,
-                snapshot.timeframe,
-                snapshot.wave_id,
-                snapshot.direction,
-                MIN(CASE WHEN snapshot.life_state = 'reborn' THEN snapshot.bar_dt END) AS reborn_start_dt,
-                MAX(CASE WHEN snapshot.life_state = 'reborn' THEN snapshot.bar_dt END) AS reborn_end_dt,
-                SUM(CASE WHEN snapshot.life_state = 'reborn' THEN 1 ELSE 0 END) AS reborn_bar_count,
-                MIN(CASE WHEN snapshot.life_state = 'alive' THEN snapshot.bar_dt END) AS first_alive_dt,
-                MIN(
-                    CASE
-                        WHEN pivot_row.pivot_type = CASE
-                            WHEN snapshot.direction = 'up' THEN 'HH'
-                            ELSE 'LL'
-                        END THEN snapshot.bar_dt
-                    END
-                ) AS first_new_extreme_dt
-            FROM live.malf_state_snapshot AS snapshot
-            LEFT JOIN live.malf_pivot_ledger AS pivot_row
-                ON pivot_row.run_id = '{safe_run_id}'
-               AND pivot_row.wave_id = snapshot.wave_id
-               AND pivot_row.bar_dt = snapshot.bar_dt
-               AND pivot_row.pivot_type = CASE
-                   WHEN snapshot.direction = 'up' THEN 'HH'
-                   ELSE 'LL'
-               END
-            WHERE snapshot.run_id = '{safe_run_id}'
-            GROUP BY 1, 2, 3, 4
-        )
-        SELECT
-            grouped.symbol,
-            grouped.timeframe,
-            grouped.wave_id,
-            grouped.direction,
-            wave_summary.start_bar_dt AS break_dt,
-            grouped.reborn_start_dt,
-            grouped.reborn_end_dt,
-            grouped.reborn_bar_count,
-            grouped.first_alive_dt,
-            grouped.first_new_extreme_dt
-        FROM grouped
-        JOIN wave_summary
-            ON wave_summary.wave_id = grouped.wave_id
-        WHERE grouped.reborn_bar_count > 0
+        SELECT *
+        FROM ({_build_reborn_windows_sql(run_id=run_id, symbols=schema_symbols)}) AS reborn_windows_source
+        WHERE FALSE
         """
     )
+
+
+def _insert_required_table_chunk(
+    *,
+    audit_connection: duckdb.DuckDBPyConnection,
+    run_id: str,
+    symbols: tuple[str, ...],
+) -> None:
+    if not symbols:
+        return
+    audit_connection.execute(
+        f"""
+        INSERT INTO wave_summary
+        {_build_wave_summary_sql(run_id=run_id, symbols=symbols)}
+        """
+    )
+    audit_connection.execute(
+        f"""
+        INSERT INTO break_events
+        {_build_break_events_sql(run_id=run_id, symbols=symbols)}
+        """
+    )
+    audit_connection.execute(
+        f"""
+        INSERT INTO reborn_windows
+        {_build_reborn_windows_sql(run_id=run_id, symbols=symbols)}
+        """
+    )
+
+
+def _build_wave_summary_sql(*, run_id: str, symbols: tuple[str, ...]) -> str:
+    safe_run_id = _sql_quote(run_id)
+    safe_symbol_list = _sql_string_list(symbols)
+    return f"""
+    WITH snapshot_enriched AS (
+        SELECT
+            symbol,
+            timeframe,
+            wave_id,
+            direction,
+            bar_dt,
+            life_state,
+            guard_price,
+            LAG(guard_price) OVER (
+                PARTITION BY symbol, timeframe, wave_id
+                ORDER BY bar_dt
+            ) AS prev_guard_price
+        FROM live.malf_state_snapshot
+        WHERE run_id = '{safe_run_id}'
+          AND symbol IN ({safe_symbol_list})
+    ),
+    snapshot_stats AS (
+        SELECT
+            symbol,
+            timeframe,
+            wave_id,
+            COUNT(*) AS bar_count,
+            SUM(CASE WHEN life_state = 'reborn' THEN 1 ELSE 0 END) AS reborn_bar_count,
+            SUM(
+                CASE
+                    WHEN prev_guard_price IS NULL THEN 0
+                    WHEN guard_price <> prev_guard_price THEN 1
+                    ELSE 0
+                END
+            ) AS guard_update_count
+        FROM snapshot_enriched
+        GROUP BY 1, 2, 3
+    )
+    SELECT
+        w.run_id,
+        w.symbol,
+        w.timeframe,
+        w.wave_id,
+        w.direction,
+        w.start_bar_dt,
+        w.end_bar_dt,
+        w.guard_bar_dt,
+        w.guard_price,
+        w.extreme_price,
+        w.new_count,
+        w.no_new_span,
+        w.life_state,
+        COALESCE(snapshot_stats.bar_count, 0) AS bar_count,
+        COALESCE(snapshot_stats.reborn_bar_count, 0) AS reborn_bar_count,
+        COALESCE(snapshot_stats.guard_update_count, 0) AS guard_update_count
+    FROM live.malf_wave_ledger AS w
+    LEFT JOIN snapshot_stats
+        ON snapshot_stats.symbol = w.symbol
+       AND snapshot_stats.timeframe = w.timeframe
+       AND snapshot_stats.wave_id = w.wave_id
+    WHERE w.run_id = '{safe_run_id}'
+      AND w.symbol IN ({safe_symbol_list})
+    """
+
+
+def _build_break_events_sql(*, run_id: str, symbols: tuple[str, ...]) -> str:
+    safe_run_id = _sql_quote(run_id)
+    safe_symbol_list = _sql_string_list(symbols)
+    return f"""
+    WITH ordered AS (
+        SELECT
+            symbol,
+            timeframe,
+            bar_dt,
+            wave_id,
+            direction,
+            life_state,
+            new_count,
+            no_new_span,
+            LAG(wave_id) OVER (
+                PARTITION BY symbol, timeframe
+                ORDER BY bar_dt
+            ) AS prev_wave_id,
+            LAG(direction) OVER (
+                PARTITION BY symbol, timeframe
+                ORDER BY bar_dt
+            ) AS prev_direction,
+            LAG(life_state) OVER (
+                PARTITION BY symbol, timeframe
+                ORDER BY bar_dt
+            ) AS prev_life_state
+        FROM live.malf_state_snapshot
+        WHERE run_id = '{safe_run_id}'
+          AND symbol IN ({safe_symbol_list})
+    ),
+    changes AS (
+        SELECT *
+        FROM ordered
+        WHERE prev_wave_id IS NOT NULL AND wave_id <> prev_wave_id
+    )
+    SELECT
+        changes.symbol,
+        changes.timeframe,
+        changes.bar_dt AS break_dt,
+        changes.prev_wave_id AS old_wave_id,
+        changes.prev_direction AS old_direction,
+        changes.prev_life_state AS old_snapshot_life_state,
+        previous_wave.life_state AS old_wave_terminal_life_state,
+        changes.wave_id AS new_wave_id,
+        changes.direction AS new_direction,
+        changes.life_state AS new_life_state,
+        changes.new_count AS new_wave_new_count,
+        changes.no_new_span AS new_wave_no_new_span,
+        CASE
+            WHEN changes.direction = 'up' THEN 'break_up'
+            ELSE 'break_down'
+        END AS expected_break_pivot_type,
+        pivot_row.pivot_type AS break_pivot_type,
+        pivot_row.price AS break_price
+    FROM changes
+    LEFT JOIN live.malf_wave_ledger AS previous_wave
+        ON previous_wave.wave_id = changes.prev_wave_id
+       AND previous_wave.run_id = '{safe_run_id}'
+    LEFT JOIN live.malf_pivot_ledger AS pivot_row
+        ON pivot_row.run_id = '{safe_run_id}'
+       AND pivot_row.wave_id = changes.prev_wave_id
+       AND pivot_row.bar_dt = changes.bar_dt
+       AND pivot_row.pivot_type = CASE
+           WHEN changes.direction = 'up' THEN 'break_up'
+           ELSE 'break_down'
+       END
+    """
+
+
+def _build_reborn_windows_sql(*, run_id: str, symbols: tuple[str, ...]) -> str:
+    safe_run_id = _sql_quote(run_id)
+    safe_symbol_list = _sql_string_list(symbols)
+    return f"""
+    WITH grouped AS (
+        SELECT
+            snapshot.symbol,
+            snapshot.timeframe,
+            snapshot.wave_id,
+            snapshot.direction,
+            MIN(CASE WHEN snapshot.life_state = 'reborn' THEN snapshot.bar_dt END) AS reborn_start_dt,
+            MAX(CASE WHEN snapshot.life_state = 'reborn' THEN snapshot.bar_dt END) AS reborn_end_dt,
+            SUM(CASE WHEN snapshot.life_state = 'reborn' THEN 1 ELSE 0 END) AS reborn_bar_count,
+            MIN(CASE WHEN snapshot.life_state = 'alive' THEN snapshot.bar_dt END) AS first_alive_dt,
+            MIN(
+                CASE
+                    WHEN pivot_row.pivot_type = CASE
+                        WHEN snapshot.direction = 'up' THEN 'HH'
+                        ELSE 'LL'
+                    END THEN snapshot.bar_dt
+                END
+            ) AS first_new_extreme_dt
+        FROM live.malf_state_snapshot AS snapshot
+        LEFT JOIN live.malf_pivot_ledger AS pivot_row
+            ON pivot_row.run_id = '{safe_run_id}'
+           AND pivot_row.wave_id = snapshot.wave_id
+           AND pivot_row.bar_dt = snapshot.bar_dt
+           AND pivot_row.pivot_type = CASE
+               WHEN snapshot.direction = 'up' THEN 'HH'
+               ELSE 'LL'
+           END
+        WHERE snapshot.run_id = '{safe_run_id}'
+          AND snapshot.symbol IN ({safe_symbol_list})
+        GROUP BY 1, 2, 3, 4
+    )
+    SELECT
+        grouped.symbol,
+        grouped.timeframe,
+        grouped.wave_id,
+        grouped.direction,
+        wave_summary.start_bar_dt AS break_dt,
+        grouped.reborn_start_dt,
+        grouped.reborn_end_dt,
+        grouped.reborn_bar_count,
+        grouped.first_alive_dt,
+        grouped.first_new_extreme_dt
+    FROM grouped
+    JOIN wave_summary
+        ON wave_summary.wave_id = grouped.wave_id
+    WHERE grouped.reborn_bar_count > 0
+    """
 
 
 def _collect_hard_rule_findings(
@@ -931,18 +1028,112 @@ def _select_sample_windows(
     audit_connection: duckdb.DuckDBPyConnection,
     sample_count: int,
 ) -> tuple[SampleWindow, ...]:
-    transition_count = max(1, sample_count // 3)
-    remaining = max(sample_count - transition_count, 0)
-    up_count = max(1, remaining // 2) if remaining else 0
-    down_count = max(0, remaining - up_count)
+    if sample_count <= 0:
+        return ()
     used_wave_ids: set[str] = set()
     selected: list[SampleWindow] = []
+    selected.extend(_select_zone_coverage_windows(audit_connection, min(sample_count, 4), used_wave_ids))
+    remaining_after_zones = max(sample_count - len(selected), 0)
+    transition_count = max(1, remaining_after_zones // 3) if remaining_after_zones else 0
+    remaining = max(remaining_after_zones - transition_count, 0)
+    up_count = max(1, remaining // 2) if remaining else 0
+    down_count = max(0, remaining - up_count)
     selected.extend(_select_directional_windows(audit_connection, "up", up_count, used_wave_ids))
     selected.extend(_select_directional_windows(audit_connection, "down", down_count, used_wave_ids))
     selected.extend(_select_transition_windows(audit_connection, transition_count, used_wave_ids))
     if len(selected) > sample_count:
         selected = selected[:sample_count]
     return tuple(selected)
+
+
+def _select_zone_coverage_windows(
+    audit_connection: duckdb.DuckDBPyConnection,
+    count: int,
+    used_wave_ids: set[str],
+) -> list[SampleWindow]:
+    if count <= 0:
+        return []
+    candidates = audit_connection.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                snapshot.wave_position_zone,
+                summary.symbol,
+                summary.wave_id,
+                summary.direction,
+                summary.start_bar_dt,
+                summary.end_bar_dt,
+                summary.bar_count,
+                summary.new_count,
+                summary.no_new_span,
+                summary.reborn_bar_count,
+                ROW_NUMBER() OVER (
+                    PARTITION BY snapshot.wave_position_zone
+                    ORDER BY
+                        snapshot.update_rank DESC,
+                        snapshot.stagnation_rank DESC,
+                        summary.bar_count DESC,
+                        summary.wave_id
+                ) AS zone_rank
+            FROM live.malf_state_snapshot AS snapshot
+            INNER JOIN wave_summary AS summary
+                ON summary.symbol = snapshot.symbol
+               AND summary.timeframe = snapshot.timeframe
+               AND summary.wave_id = snapshot.wave_id
+            WHERE snapshot.wave_position_zone IN (
+                'early_progress',
+                'mature_progress',
+                'mature_stagnation',
+                'weak_stagnation'
+            )
+        )
+        SELECT
+            wave_position_zone,
+            symbol,
+            wave_id,
+            direction,
+            start_bar_dt,
+            end_bar_dt,
+            bar_count,
+            new_count,
+            no_new_span,
+            reborn_bar_count
+        FROM ranked
+        WHERE zone_rank = 1
+        ORDER BY
+            CASE wave_position_zone
+                WHEN 'early_progress' THEN 1
+                WHEN 'mature_progress' THEN 2
+                WHEN 'mature_stagnation' THEN 3
+                WHEN 'weak_stagnation' THEN 4
+                ELSE 5
+            END
+        LIMIT ?
+        """,
+        [count],
+    ).df()
+    selected: list[SampleWindow] = []
+    for row in candidates.to_dict(orient="records"):
+        if row["wave_id"] in used_wave_ids:
+            continue
+        used_wave_ids.add(str(row["wave_id"]))
+        zone = str(row["wave_position_zone"])
+        selected.append(
+            SampleWindow(
+                sample_id=f"zone_coverage_{zone}-01",
+                category=f"zone_coverage_{zone}",
+                symbol=str(row["symbol"]),
+                direction=str(row["direction"]),
+                wave_id=str(row["wave_id"]),
+                start_bar_dt=_format_datetime(row["start_bar_dt"]) or "",
+                end_bar_dt=_format_datetime(row["end_bar_dt"]) or "",
+                bar_count=int(row["bar_count"] or 0),
+                final_new_count=int(row["new_count"] or 0),
+                final_no_new_span=int(row["no_new_span"] or 0),
+                reborn_bar_count=int(row["reborn_bar_count"] or 0),
+            )
+        )
+    return selected
 
 
 def _select_directional_windows(
@@ -1709,6 +1900,12 @@ def _render_markdown_summary(summary: MalfSemanticAuditSummary) -> str:
 
 def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _sql_string_list(values: tuple[str, ...]) -> str:
+    if not values:
+        return "NULL"
+    return ", ".join(f"'{_sql_quote(value)}'" for value in values)
 
 
 def _format_datetime(value: datetime | pd.Timestamp | str | None) -> str | None:

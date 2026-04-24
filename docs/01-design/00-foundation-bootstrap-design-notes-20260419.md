@@ -110,3 +110,21 @@
 3. `structure/filter` 不再出现在正式源码和脚本依赖中。
 4. `malf/alpha/position` 的最小 runner 入口可调用。
 5. 阶段一自身拥有完整中文补记：`card + evidence + record + conclusion`。
+
+## 7. 2026-04-24 补记：MALF 地基状态
+
+阶段一只负责把新系统主链路和工作区底盘立住，当时不进入 `MALF` 业务语义实现。
+
+截至 Card 62，`MALF` 已完成地基语义收口并被登记为 `放行`。当前设计层应按以下事实理解阶段一的主链路：
+
+- `data` 提供客观事实输入
+- `malf` 是唯一正式市场结构真值层
+- `alpha / position / portfolio_plan / trade / system` 均是 `MALF` 之后的下游消费与执行链路
+
+正式语义入口为：
+
+- `docs/02-spec/01-malf-wave-scale-semantic-spec-v1-placeholder-20260419.md`
+- `docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
+- `docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+
+本补记不改写阶段一的验收结论，只把后续已成立的 `MALF` 地基状态接回设计层入口。

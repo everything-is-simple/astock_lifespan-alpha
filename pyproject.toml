@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "pytest>=9.0.0",
     "pandas>=2.2.0",
+    "matplotlib>=3.8.0",
     "pre-commit>=4.3.0",
 ]
 
@@ -28,4 +29,3 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "--basetemp=H:/Lifespan-temp/pytest-tmp"
 cache_dir = "H:/Lifespan-temp/pytest-cache"
-

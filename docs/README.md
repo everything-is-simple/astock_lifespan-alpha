@@ -62,6 +62,8 @@ card -> evidence -> record -> conclusion
 42. `docs/02-spec/22-stage-seventeen-rolling-backtest-minimal-v1-spec-20260421.md`
 43. `docs/02-spec/25-stage-twenty-malf-day-formal-target-recovery-and-isolated-regate-spec-v1-20260423.md`
 44. `docs/03-execution/61-malf-day-formal-target-recovery-and-isolated-regate-conclusion-20260423.md`
+45. `docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
+46. `docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
 
 ## 目录职责
 
@@ -353,3 +355,17 @@ Stage-five engineering defaults are frozen:
 - 本轮 `--no-resume` full-universe rebuild 已正式走 `.building.duckdb -> promote`
 - forced audit 已直接命中新 run，7 项硬规则全部通过
 - 当前唯一剩余入口是 `zone_coverage = 3` 的软观察，不再是 recovery/build 基础设施问题
+
+## Card 62 补充
+
+- 新规格：`docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
+- `malf` Card 62 结论：`docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+- 当前 gate 结论：`malf = 放行`
+- `astock_lifespan_alpha.malf` public import 已恢复为轻量入口，不再顶层加载 `malf.audit`
+- audit/dev 依赖显式包含 `pandas / matplotlib`
+- `state_snapshot_sample` 已优先覆盖四个 `wave_position_zone`
+- forced audit `malf-day-semantic-audit-ad35dcbbae62` 直接命中 `day-e687a8277f61`
+- 7 项硬规则全部 `pass`
+- 4 项软观察全部 `ok`
+- `zone_coverage = ok (4)`
+- `verdict = 通过`

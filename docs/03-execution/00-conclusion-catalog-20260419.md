@@ -366,3 +366,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/61-malf-day-formal-target-recovery-and-isolated-regate-conclusion-20260423.md`
 - 裁决：`已接受，恢复与 isolated rebuild 通过；live semantic gate 仍部分通过`
 - 说明：Card 61 已新增 `recover_malf_day_formal_target` 与新的 `day + full_universe + --no-resume` staging build 合同；MALF 单测 `28 passed`。本轮先从 `day-fc56ff5e5441` 恢复 canonical target 并隔离 polluted target，再生成新的 formal run `day-e687a8277f61`，`promoted_to_target = true`，forced audit 直接命中新 run，7 项硬规则全部 `pass`。当前剩余入口只剩 `zone_coverage = 3` 这一个软观察，不再是 recovery/build 基础设施阻塞。
+
+### `62` MALF 地基 Canon、包入口修复与 zone sampling 收口
+
+- 结论文档：`docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+- 裁决：`已接受，malf 放行`
+- 说明：Card 62 已新增 MALF Canon，修复 `malf` 包入口顶层加载 audit 依赖的问题，并将 `state_snapshot_sample` 选择改为优先覆盖四个 `wave_position_zone`。新增契约门 `6 passed`，MALF 单测 `30 passed`，文档契约 `4 passed`，模块边界 `4 passed`。forced audit `malf-day-semantic-audit-ad35dcbbae62` 直接命中 `day-e687a8277f61`，7 项硬规则全部 `pass`，4 项软观察全部 `ok`，`zone_coverage = ok (4)`，最终 `verdict = 通过`。

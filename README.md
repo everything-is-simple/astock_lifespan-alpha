@@ -253,3 +253,16 @@ Stage-five implementation defaults are now frozen before engineering work:
 - `position_run.alpha_source_path` 继续指向正式 `alpha_signal.duckdb`
 - 本轮把当前 `astock alpha` 审定为 trigger ledger producer，不吸收历史 PAS 因子体系
 - 下一顺序切到 `malf`
+
+## MALF Card 62 更新
+
+- MALF 地基 Canon 已冻结：`docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
+- `malf` 包入口已恢复轻量 public import，不再顶层加载 `malf.audit`
+- audit/dev 依赖已显式包含 `pandas / matplotlib`
+- `state_snapshot_sample` 已优先覆盖四个 `wave_position_zone`
+- 最新 forced audit：`malf-day-semantic-audit-ad35dcbbae62`
+- forced audit 目标：`day-e687a8277f61`
+- 7 项硬规则全部 `pass`
+- 4 项软观察全部 `ok`
+- `zone_coverage = ok (4)`
+- 当前 gate 结论：`malf = 放行`
