@@ -16,6 +16,12 @@
 data -> malf -> alpha -> position -> portfolio_plan -> trade -> system
 ```
 
+2026-04-24 补记：
+
+- pipeline 只编排 public runner，不改任何业务语义。
+- `malf` 在该主链路中是唯一正式市场结构真值层。
+- 下游只消费 MALF 事实，不反向定义 MALF。
+
 ## 2. 正式接口
 
 阶段八新增 runner：
@@ -94,4 +100,3 @@ pipeline 只记录 step summary，不直接写 `malf / alpha / position / portfo
 3. pipeline 不直接写业务表。
 4. 单元测试使用临时 workspace，不读取真实 `H:\Lifespan-data` 大库。
 5. docs 测试、pipeline 测试、contracts 测试与全量测试通过。
-

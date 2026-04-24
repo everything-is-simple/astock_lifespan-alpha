@@ -17,6 +17,13 @@
 
 当图版、代码、临时讨论与本文冲突时，以本文为准。
 
+2026-04-24 补记：
+
+- 本文继续作为 `MALF` 文本语义基准。
+- `docs/02-spec/26-malf-foundation-canon-v1-20260424.md` 作为 Card 62 后的地基 Canon，用于把本文、图版与 live audit 结论收束为当前长期口径。
+- 当前 gate 结论为 `malf = 放行`。
+- 下游只消费 MALF 事实，不反向定义 MALF。
+
 ## 2. 真值边界
 
 `MALF` 是新系统唯一正式市场结构真值层。
@@ -304,3 +311,4 @@ WavePosition = (direction, update_rank, stagnation_rank, life_state)
 4. `break` 与 `confirmation` 不是同一件事。
 5. `reborn` 是正式中间生命态。
 6. `day / week / month` 必须完全独立运行。
+7. Card 62 后，`MALF` 地基语义以本文与 `docs/02-spec/26-malf-foundation-canon-v1-20260424.md` 共同作为长期基准。

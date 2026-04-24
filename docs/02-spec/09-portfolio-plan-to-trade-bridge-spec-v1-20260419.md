@@ -36,6 +36,13 @@ portfolio_plan_snapshot
 1. `trade` 直接读取 `alpha` 或 `position` 内部过程。
 2. `trade` 回写 `portfolio_plan` 的组合主语义。
 3. `trade` 自动触发 `system`。
+4. `trade` 用执行状态反向定义 `MALF` 或 `alpha` 的上游事实。
+
+2026-04-24 补记：
+
+- `trade` 是执行层，不是结构事实层。
+- 若执行链路间接携带 `MALF` 上下文，也只作为来源谱系与审计字段使用。
+- 下游只消费 MALF 事实，不反向定义 MALF。
 
 ## 3. 正式上游与输入字段
 

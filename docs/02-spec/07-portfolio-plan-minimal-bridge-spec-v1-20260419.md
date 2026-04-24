@@ -33,6 +33,13 @@ position_candidate_audit + position_capacity_snapshot + position_sizing_snapshot
 - `portfolio_plan` 直接读取 `alpha_signal` 或五个 trigger 库。
 - `portfolio_plan` 回写 `position` 的 sizing 主语义。
 - `portfolio_plan` 自动触发 `trade / system`。
+- `portfolio_plan` 反向定义 `MALF`、`alpha` 或 `position` 的上游事实。
+
+2026-04-24 补记：
+
+- `portfolio_plan` 只能消费 `position` 已物化的候选、容量与 sizing 结果。
+- 若其中携带 `MALF` 上下文字段，也只作为下游上下文使用。
+- 下游只消费 MALF 事实，不反向定义 MALF。
 
 ## 3. 正式表族
 

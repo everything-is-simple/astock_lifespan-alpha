@@ -140,3 +140,17 @@ card -> evidence -> record -> conclusion
 - 当前结论可作为后续阶段输入
 
 但这不意味着后续实现不能继续迭代；它只意味着本批次冻结的边界已经成立。
+
+## 11. 2026-04-24 补记：规格入口维护
+
+当 execution 结论固化为长期系统口径时，不能只停留在 execution 层。
+
+必须同步判断是否需要更新：
+
+- `docs/02-spec/README.md`
+- 相关长期基准规格
+- `docs/README.md`
+- `docs/03-execution/README.md`
+- `docs/03-execution/00-conclusion-catalog-20260419.md`
+
+Card 62 的 `MALF` 地基 Canon 是当前样例：`malf = 放行` 不只是一次执行结果，也会改变后来者阅读规格区的入口顺序与系统地基判断。

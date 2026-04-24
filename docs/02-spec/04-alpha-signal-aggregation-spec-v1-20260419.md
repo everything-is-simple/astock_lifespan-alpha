@@ -28,6 +28,12 @@
 - 在 `alpha_signal` 中混入 `position` 逻辑
 - 直接把五个 trigger 账本暴露给 `position` 作为正式上游
 
+2026-04-24 补记：
+
+- `alpha_signal` 保留 `MALF` 字段，是为了把结构事实随信号向下游传递。
+- `alpha_signal` 不解释、不修正、不重算 `MALF`。
+- 下游只消费 MALF 事实，不反向定义 MALF。
+
 ## 3. 正式字段集
 
 `alpha_signal` 的最小字段集冻结为：

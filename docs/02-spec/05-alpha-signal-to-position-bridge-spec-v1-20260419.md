@@ -25,6 +25,13 @@ alpha_signal -> position_candidate_audit / position_capacity_snapshot / position
 - `position` 直接读取五个 trigger 库。
 - `position` 直接读取 `alpha` 内部未冻结的 detector payload。
 - 把旧仓 `alpha formal signal` admission 字段整包回引到新仓。
+- 把 `position` 的容量、准入或 sizing 结果反写为 `MALF` 结构语义。
+
+2026-04-24 补记：
+
+- `position` 读取的 `direction / new_count / no_new_span / life_state / update_rank / stagnation_rank / wave_position_zone` 都是 `MALF` 事实的下游副本。
+- `position` 可以基于这些字段派生候选、容量与 sizing，但不得重新定义这些字段。
+- 下游只消费 MALF 事实，不反向定义 MALF。
 
 ## 3. 最小输入字段组
 

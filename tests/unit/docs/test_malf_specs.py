@@ -85,3 +85,38 @@ def test_malf_foundation_canon_freezes_core_concepts():
 
     for term in required_terms:
         assert term in content
+
+
+def test_spec_index_declares_malf_foundation_reading_path():
+    repo_root = Path(__file__).resolve().parents[3]
+    content = (repo_root / "docs" / "02-spec" / "README.md").read_text(encoding="utf-8")
+
+    required_terms = [
+        "当前系统地基：`MALF`",
+        "`data -> malf -> alpha -> position -> portfolio_plan -> trade -> system`",
+        "`docs/02-spec/26-malf-foundation-canon-v1-20260424.md`",
+        "阶段规格不得反向改写 MALF 地基语义",
+        "`malf = 放行`",
+    ]
+
+    for term in required_terms:
+        assert term in content
+
+
+def test_downstream_specs_preserve_malf_as_consumed_foundation():
+    repo_root = Path(__file__).resolve().parents[3]
+    spec_paths = [
+        "03-alpha-pas-trigger-semantic-spec-v1-20260419.md",
+        "04-alpha-signal-aggregation-spec-v1-20260419.md",
+        "05-alpha-signal-to-position-bridge-spec-v1-20260419.md",
+        "06-position-minimal-ledger-and-runner-spec-v1-20260419.md",
+        "07-portfolio-plan-minimal-bridge-spec-v1-20260419.md",
+        "08-trade-minimal-execution-ledger-and-runner-spec-v1-20260419.md",
+        "09-portfolio-plan-to-trade-bridge-spec-v1-20260419.md",
+        "11-system-minimal-readout-and-runner-spec-v1-20260419.md",
+        "13-data-to-system-minimal-pipeline-orchestration-spec-v1-20260419.md",
+    ]
+
+    for relative_path in spec_paths:
+        content = (repo_root / "docs" / "02-spec" / relative_path).read_text(encoding="utf-8")
+        assert "只消费 MALF 事实，不反向定义 MALF" in content

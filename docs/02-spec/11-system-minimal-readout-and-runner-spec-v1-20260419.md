@@ -12,6 +12,12 @@
 
 阶段六 v1 不回读 `alpha / position / portfolio_plan`，不触发上游 runner，不重开阶段五已经冻结的 `execution_price_line` 物理口径。
 
+2026-04-24 补记：
+
+- `system` 是最终 readout，不是上游真值层。
+- `system` 不读取、不修正、不重算 `MALF`。
+- 下游只消费 MALF 事实，不反向定义 MALF。
+
 ## 2. 上游边界
 
 `system` 的唯一正式上游固定为：

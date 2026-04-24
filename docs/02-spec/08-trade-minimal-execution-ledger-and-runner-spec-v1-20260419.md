@@ -60,6 +60,13 @@
 
 1. 把 `analysis_price_line` 的语义直接当作 `trade` 正式执行价格口径。
 2. 用 `malf / alpha` 内部价格推导替代 `trade` 的正式输入适配。
+3. 用执行回报反向修正 `MALF` 结构事实。
+
+2026-04-24 补记：
+
+- `trade` 不读取 `MALF`，也不裁决 `MALF`。
+- `trade` 只消费经过 `portfolio_plan` 放行后的执行意图。
+- 下游只消费 MALF 事实，不反向定义 MALF。
 
 ## 4. 正式表族
 

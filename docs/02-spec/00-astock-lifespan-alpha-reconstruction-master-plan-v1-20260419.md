@@ -326,6 +326,20 @@ guard 规则冻结为：
 - 同一方向
 - 以完整历史波作为样本单位
 
+### 6.11 2026-04-24 补记：MALF 地基 Canon
+
+Card 62 后，`MALF` 地基语义已由 `docs/02-spec/26-malf-foundation-canon-v1-20260424.md` 收束为当前长期口径。
+
+补记冻结以下状态：
+
+- `malf = 放行`
+- `MALF` 不是交易系统，不输出买卖动作
+- `MALF` 不回答收益概率，不用均线语义替代结构事实
+- `MALF` 的唯一输入是 `price bars`
+- 下游只消费 MALF 事实，不反向定义 MALF
+
+本补记不改变原主链路，只明确 `data -> malf -> alpha -> position -> portfolio_plan -> trade -> system` 中 `malf` 已作为系统地基成立。
+
 ## 7. Alpha 正式重构规格
 
 `alpha` 重构为日线 PAS 五触发器体系：

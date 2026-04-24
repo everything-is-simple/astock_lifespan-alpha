@@ -29,6 +29,12 @@
 2. `capacity_snapshot`：表达单标最大允许容量。
 3. `sizing_snapshot`：表达最小目标权重与减仓需求。
 
+2026-04-24 补记：
+
+- `position` 读取到的 `MALF` 字段来自 `alpha_signal` 的正式传递。
+- `position` 可以基于这些字段派生候选、容量与 sizing。
+- 下游只消费 MALF 事实，不反向定义 MALF。
+
 ## 3. 正式表族
 
 ### 3.1 `position_run`
