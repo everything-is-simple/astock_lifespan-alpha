@@ -95,6 +95,8 @@ def test_spec_index_declares_malf_foundation_reading_path():
         "当前系统地基：`MALF`",
         "`data -> malf -> alpha -> position -> portfolio_plan -> trade -> system`",
         "`docs/02-spec/26-malf-foundation-canon-v1-20260424.md`",
+        "`docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md`",
+        "`26 MALF Canon -> 27 MALF+Alpha lineage lessons -> 03/04 Alpha specs`",
         "阶段规格不得反向改写 MALF 地基语义",
         "`malf = 放行`",
     ]
@@ -120,3 +122,28 @@ def test_downstream_specs_preserve_malf_as_consumed_foundation():
     for relative_path in spec_paths:
         content = (repo_root / "docs" / "02-spec" / relative_path).read_text(encoding="utf-8")
         assert "只消费 MALF 事实，不反向定义 MALF" in content
+
+
+def test_lineage_lessons_freeze_malf_alpha_pas_core():
+    repo_root = Path(__file__).resolve().parents[3]
+    content = (
+        repo_root / "docs" / "02-spec" / "27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md"
+    ).read_text(encoding="utf-8")
+
+    required_terms = [
+        "MALF+alpha(PAS) 为系统核心",
+        "`data -> MALF -> alpha(PAS)`",
+        "`G:\\history-lifespan\\lifespan-0.01`",
+        "`G:\\history-lifespan\\MarketLifespan-Quant`",
+        "`G:\\history-lifespan\\EmotionQuant-gamma`",
+        "`H:\\Lifespan-Validated`",
+        "`H:\\astock_lifespan-alpha`",
+        "不恢复 `structure/filter/family/formal_signal` 为上游真值",
+        "实验素材不得直接进入核心",
+        "alpha(PAS) 只消费 MALF 事实",
+        "`alpha_trigger_event`",
+        "`alpha_signal`",
+    ]
+
+    for term in required_terms:
+        assert term in content

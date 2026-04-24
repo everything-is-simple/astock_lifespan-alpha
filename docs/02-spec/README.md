@@ -33,9 +33,13 @@ Card 62 后，当前 gate 结论为：
 2. `docs/02-spec/01-malf-wave-scale-semantic-spec-v1-placeholder-20260419.md`
 3. `docs/02-spec/02-malf-wave-scale-diagram-edition-placeholder-20260419.md`
 4. `docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
-5. `docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+5. `docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md`
+6. `docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+7. `docs/03-execution/63-malf-alpha-lineage-lessons-and-core-landing-conclusion-20260424.md`
 
 其中 `docs/02-spec/26-malf-foundation-canon-v1-20260424.md` 是 Card 62 后的 MALF 地基 Canon，用来把图版、文本规格与 live audit 结论收束成当前长期口径。
+
+`docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md` 是 Card 63 后的前代经验收口规格，用来明确当前系统不是恢复旧复杂系统，而是以 `MALF+alpha(PAS) 为系统核心`，按 `26 MALF Canon -> 27 MALF+Alpha lineage lessons -> 03/04 Alpha specs` 的顺序继续推进 alpha(PAS)。
 
 ## 历史阶段规格的读法
 
