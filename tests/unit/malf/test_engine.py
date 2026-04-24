@@ -173,6 +173,70 @@ def test_run_malf_engine_confirms_guard_only_on_structure_resume():
     ]
 
 
+def test_up_break_starts_down_reborn_and_waits_for_ll_confirmation():
+    bars = [
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 2), open=10.0, high=11.0, low=9.0, close=10.6),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 3), open=10.6, high=12.5, low=10.0, close=12.0),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 4), open=12.0, high=12.4, low=10.4, close=11.0),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 5), open=11.0, high=10.5, low=8.8, close=9.0),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 6), open=9.0, high=10.2, low=8.9, close=9.5),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 7), open=9.5, high=9.9, low=8.7, close=8.8),
+    ]
+
+    result = engine.run_malf_engine(symbol="AAA", timeframe=Timeframe.DAY, bars=bars)
+    snapshots = {row.bar_dt.date().isoformat(): row for row in result.state_snapshots}
+    wave2_pivots = [row for row in result.pivots if row.wave_id.endswith("0002")]
+
+    assert snapshots["2026-01-05"].direction == "down"
+    assert snapshots["2026-01-05"].life_state == "reborn"
+    assert snapshots["2026-01-05"].new_count == 0
+    assert snapshots["2026-01-05"].no_new_span == 0
+    assert snapshots["2026-01-06"].life_state == "reborn"
+    assert snapshots["2026-01-06"].new_count == 0
+    assert snapshots["2026-01-06"].no_new_span == 1
+    assert snapshots["2026-01-07"].life_state == "alive"
+    assert snapshots["2026-01-07"].new_count == 1
+    assert snapshots["2026-01-07"].no_new_span == 0
+    assert [(row.bar_dt.date().isoformat(), row.pivot_type) for row in wave2_pivots] == [
+        ("2026-01-07", "LL"),
+        ("2026-01-07", "LH"),
+    ]
+
+
+def test_down_break_starts_up_reborn_and_waits_for_hh_confirmation():
+    bars = [
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 2), open=10.0, high=11.0, low=9.0, close=10.0),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 3), open=10.0, high=10.5, low=8.5, close=8.8),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 4), open=8.8, high=10.0, low=8.7, close=9.0),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 5), open=9.0, high=11.2, low=9.2, close=10.9),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 6), open=10.9, high=11.1, low=9.8, close=10.5),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 7), open=10.5, high=11.15, low=10.1, close=10.8),
+        OhlcBar(symbol="AAA", bar_dt=datetime(2026, 1, 8), open=10.8, high=11.8, low=10.6, close=11.6),
+    ]
+
+    result = engine.run_malf_engine(symbol="AAA", timeframe=Timeframe.DAY, bars=bars)
+    snapshots = {row.bar_dt.date().isoformat(): row for row in result.state_snapshots}
+    wave2_pivots = [row for row in result.pivots if row.wave_id.endswith("0002")]
+
+    assert snapshots["2026-01-05"].direction == "up"
+    assert snapshots["2026-01-05"].life_state == "reborn"
+    assert snapshots["2026-01-05"].new_count == 0
+    assert snapshots["2026-01-05"].no_new_span == 0
+    assert snapshots["2026-01-06"].life_state == "reborn"
+    assert snapshots["2026-01-06"].new_count == 0
+    assert snapshots["2026-01-06"].no_new_span == 1
+    assert snapshots["2026-01-07"].life_state == "reborn"
+    assert snapshots["2026-01-07"].new_count == 0
+    assert snapshots["2026-01-07"].no_new_span == 2
+    assert snapshots["2026-01-08"].life_state == "alive"
+    assert snapshots["2026-01-08"].new_count == 1
+    assert snapshots["2026-01-08"].no_new_span == 0
+    assert [(row.bar_dt.date().isoformat(), row.pivot_type) for row in wave2_pivots] == [
+        ("2026-01-08", "HH"),
+        ("2026-01-08", "HL"),
+    ]
+
+
 def test_rank_and_zone_classification_cover_four_quadrants():
     waves = [
         engine.WaveRow(

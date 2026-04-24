@@ -96,7 +96,9 @@ def test_spec_index_declares_malf_foundation_reading_path():
         "`data -> malf -> alpha -> position -> portfolio_plan -> trade -> system`",
         "`docs/02-spec/26-malf-foundation-canon-v1-20260424.md`",
         "`docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md`",
+        "`docs/02-spec/29-malf-structural-lifespan-proof-harness-v1-20260424.md`",
         "`26 MALF Canon -> 27 MALF+Alpha lineage lessons -> 03/04 Alpha specs`",
+        "`26 MALF Canon -> 29 MALF structural lifespan proof harness -> 62/65 conclusions`",
         "阶段规格不得反向改写 MALF 地基语义",
         "`malf = 放行`",
     ]
@@ -143,6 +145,30 @@ def test_lineage_lessons_freeze_malf_alpha_pas_core():
         "alpha(PAS) 只消费 MALF 事实",
         "`alpha_trigger_event`",
         "`alpha_signal`",
+    ]
+
+    for term in required_terms:
+        assert term in content
+
+
+def test_malf_structural_lifespan_proof_harness_freezes_card65_semantics():
+    repo_root = Path(__file__).resolve().parents[3]
+    content = (
+        repo_root / "docs" / "02-spec" / "29-malf-structural-lifespan-proof-harness-v1-20260424.md"
+    ).read_text(encoding="utf-8")
+
+    required_terms = [
+        "MALF 是结构事实账本",
+        "唯一输入仍然是 `price bars`",
+        "状态先由结构决定，再由寿命坐标定位",
+        "`break != confirmation`",
+        "`reborn -> alive` 必须由新方向正式 `HH / LL` 确认",
+        "`new-count × no-new-span × life-state`",
+        "`WavePosition = (direction, update-rank, stagnation-rank, life-state)`",
+        "不输出交易动作",
+        "不输出收益概率",
+        "不使用均线语义",
+        "不反向消费 alpha 判断",
     ]
 
     for term in required_terms:

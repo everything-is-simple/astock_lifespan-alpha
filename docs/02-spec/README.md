@@ -34,12 +34,16 @@ Card 62 后，当前 gate 结论为：
 3. `docs/02-spec/02-malf-wave-scale-diagram-edition-placeholder-20260419.md`
 4. `docs/02-spec/26-malf-foundation-canon-v1-20260424.md`
 5. `docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md`
-6. `docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
-7. `docs/03-execution/63-malf-alpha-lineage-lessons-and-core-landing-conclusion-20260424.md`
+6. `docs/02-spec/29-malf-structural-lifespan-proof-harness-v1-20260424.md`
+7. `docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
+8. `docs/03-execution/65-malf-structural-lifespan-proof-harness-conclusion-20260424.md`
+9. `docs/03-execution/63-malf-alpha-lineage-lessons-and-core-landing-conclusion-20260424.md`
 
 其中 `docs/02-spec/26-malf-foundation-canon-v1-20260424.md` 是 Card 62 后的 MALF 地基 Canon，用来把图版、文本规格与 live audit 结论收束成当前长期口径。
 
 `docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md` 是 Card 63 后的前代经验收口规格，用来明确当前系统不是恢复旧复杂系统，而是以 `MALF+alpha(PAS) 为系统核心`，按 `26 MALF Canon -> 27 MALF+Alpha lineage lessons -> 03/04 Alpha specs` 的顺序继续推进 alpha(PAS)。
+
+`docs/02-spec/29-malf-structural-lifespan-proof-harness-v1-20260424.md` 是 Card 65 后的 MALF 结构寿命语义证明规格，用来把 `break != confirmation`、`reborn -> alive`、`new-count × no-new-span × life-state` 与 `WavePosition` 固定为可回归证明。阅读 MALF 深水区语义时按 `26 MALF Canon -> 29 MALF structural lifespan proof harness -> 62/65 conclusions`。
 
 ## Alpha(PAS) 阅读路径
 
