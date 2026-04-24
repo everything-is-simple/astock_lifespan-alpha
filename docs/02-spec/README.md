@@ -41,6 +41,23 @@ Card 62 后，当前 gate 结论为：
 
 `docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md` 是 Card 63 后的前代经验收口规格，用来明确当前系统不是恢复旧复杂系统，而是以 `MALF+alpha(PAS) 为系统核心`，按 `26 MALF Canon -> 27 MALF+Alpha lineage lessons -> 03/04 Alpha specs` 的顺序继续推进 alpha(PAS)。
 
+## Alpha(PAS) 阅读路径
+
+阅读 `alpha(PAS)` 当前合同与下一轮边界时，按下面顺序：
+
+1. `docs/02-spec/03-alpha-pas-trigger-semantic-spec-v1-20260419.md`
+2. `docs/02-spec/04-alpha-signal-aggregation-spec-v1-20260419.md`
+3. `docs/02-spec/28-alpha-pas-upgrade-boundary-and-legacy-delta-selection-v1-20260424.md`
+4. `docs/02-spec/27-lineage-lessons-malf-alpha-pas-core-v1-20260424.md`
+5. `docs/03-execution/57-alpha-live-freeze-audit-conclusion-20260423.md`
+6. `docs/03-execution/64-alpha-pas-upgrade-boundary-and-legacy-delta-selection-conclusion-20260424.md`
+
+其中：
+
+- `03 / 04` 说明当前 trigger 合同与 `alpha_signal` 聚合合同
+- `28` 说明哪些历史 PAS 能力暂不吸收，哪些成为下一轮最小升级入口
+- `27` 说明更高层的 lineage lessons 与 `MALF+alpha(PAS)` 核心路线
+
 ## 历史阶段规格的读法
 
 本目录包含两类文档：
