@@ -384,3 +384,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/67-run-id-key-boundary-contract-conclusion-20260425.md`
 - 裁决：`已接受`
 - 说明：Card 67 将正式表分为 `ledger / checkpoint / queue / run_audit` 四类，并以契约测试冻结 `ledger / checkpoint` 主键不得包含 run lineage 字段；`*_work_queue` 正式解释为 per-run 执行痕迹，不承担断点续传账本职责。
+
+### `68` data stock producer 硬化与复演
+
+- 结论文档：`docs/03-execution/68-data-stock-producer-hardening-rehearsal-conclusion-20260425.md`
+- 裁决：`已接受`
+- 说明：Card 68 在 Card 66 stock-only isolated producer 基础上新增 A 股 stock-only 门禁、isolated target audit 与 producer rehearsal runner；`510300.SH` 继续登记为老库 read-only audit anomaly，本卡不修补正式老库、不扩 index/block、不引入网络日更，pipeline 默认 13 step 合同不变。

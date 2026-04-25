@@ -14,7 +14,7 @@ from astock_lifespan_alpha.data.contracts import TdxStockRawIngestSummary
 from astock_lifespan_alpha.data.ledger_timeframe import normalize_timeframe, raw_market_timeframe_ledger_path
 from astock_lifespan_alpha.data.safety import ensure_safe_target_data_root, resolve_target_data_root
 from astock_lifespan_alpha.data.schema import RAW_STOCK_TABLE_BY_TIMEFRAME, initialize_raw_market_schema
-from astock_lifespan_alpha.data.tdx import parse_tdx_stock_file, resolve_adjust_method_folder
+from astock_lifespan_alpha.data.tdx import is_a_share_stock_code, parse_tdx_stock_file, resolve_adjust_method_folder
 
 DEFAULT_TDX_SOURCE_ROOT = Path("H:/tdx_offline_Data")
 
@@ -66,6 +66,8 @@ def run_tdx_stock_raw_ingest(
     bar_inserted_count = 0
     bar_reused_count = 0
     bar_rematerialized_count = 0
+    excluded_non_stock_file_count = 0
+    excluded_non_stock_codes: set[str] = set()
 
     with duckdb.connect(str(raw_path)) as connection:
         connection.execute(
@@ -79,6 +81,22 @@ def run_tdx_stock_raw_ingest(
             [materialization_run_id, normalized_timeframe, normalized_adjust, str(source_base), len(candidate_files)],
         )
         for path in candidate_files:
+            candidate_code = _resolve_code_from_filename(path)
+            if not is_a_share_stock_code(candidate_code):
+                excluded_non_stock_file_count += 1
+                excluded_non_stock_codes.add(candidate_code)
+                fallback_nk = f"{candidate_code}|{normalized_adjust}|{normalized_timeframe}|{path}"
+                _record_file(
+                    connection,
+                    materialization_run_id,
+                    fallback_nk,
+                    candidate_code,
+                    path,
+                    "excluded_non_stock",
+                    0,
+                    "non-stock code excluded by stock-only producer gate",
+                )
+                continue
             try:
                 action, inserted, reused, rematerialized, row_count, file_nk, code = _ingest_one_file(
                     connection=connection,
@@ -116,7 +134,12 @@ def run_tdx_stock_raw_ingest(
                 )
                 raise
 
-        processed_file_count = ingested_file_count + skipped_unchanged_file_count + failed_file_count
+        processed_file_count = (
+            ingested_file_count
+            + skipped_unchanged_file_count
+            + failed_file_count
+            + excluded_non_stock_file_count
+        )
         connection.execute(
             """
             UPDATE raw_ingest_run
@@ -143,6 +166,9 @@ def run_tdx_stock_raw_ingest(
         bar_inserted_count=bar_inserted_count,
         bar_reused_count=bar_reused_count,
         bar_rematerialized_count=bar_rematerialized_count,
+        excluded_file_count=excluded_non_stock_file_count,
+        excluded_non_stock_file_count=excluded_non_stock_file_count,
+        excluded_non_stock_codes=tuple(sorted(excluded_non_stock_codes)),
         message="raw ingest completed.",
     )
     if summary_path is not None:
@@ -336,6 +362,14 @@ def _matches_instrument(path: Path, instruments: set[str]) -> bool:
         return False
     exchange, code = stem.split("#", 1)
     return code in instruments or f"{code}.{exchange}" in instruments
+
+
+def _resolve_code_from_filename(path: Path) -> str:
+    stem = path.stem
+    if "#" not in stem:
+        raise ValueError(f"Unexpected TDX file name: {path.name}")
+    exchange, code = stem.split("#", 1)
+    return f"{code}.{exchange}".upper()
 
 
 def _hash_file(path: Path) -> str:

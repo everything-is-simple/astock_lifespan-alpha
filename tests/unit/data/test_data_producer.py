@@ -9,8 +9,10 @@ from astock_lifespan_alpha.core.paths import WorkspaceRoots
 from astock_lifespan_alpha.data import (
     DataProducerSafetyError,
     audit_data_source_fact_freeze,
+    audit_stock_producer_target,
     market_base_timeframe_ledger_path,
     raw_market_timeframe_ledger_path,
+    run_data_stock_producer_rehearsal,
     run_market_base_build,
     run_tdx_stock_raw_ingest,
 )
@@ -70,6 +72,35 @@ def test_tdx_raw_ingest_writes_isolated_raw_ledger_and_skips_unchanged_files(tmp
     assert row_count == 2
     assert dirty_rows == [("600000.SH", "pending")]
     assert not settings.source_databases.raw_market.exists()
+
+
+def test_tdx_raw_ingest_excludes_non_stock_codes_without_dirty_rows(tmp_path: Path) -> None:
+    settings = _settings(tmp_path / "official")
+    source_root = _write_tdx_fixture_with_non_stock_code(tmp_path / "tdx")
+    target_root = tmp_path / "isolated"
+
+    summary = run_tdx_stock_raw_ingest(
+        settings=settings,
+        source_root=source_root,
+        target_data_root=target_root,
+        adjust_method="none",
+        run_id="raw-non-stock-test",
+    )
+
+    assert summary.candidate_file_count == 2
+    assert summary.excluded_file_count == 1
+    assert summary.excluded_non_stock_file_count == 1
+    assert summary.excluded_non_stock_codes == ("510300.SH",)
+    assert summary.ingested_file_count == 1
+    raw_path = raw_market_timeframe_ledger_path(target_root, timeframe="day")
+    with duckdb.connect(str(raw_path), read_only=True) as connection:
+        codes = connection.execute("SELECT DISTINCT code FROM stock_daily_bar ORDER BY code").fetchall()
+        dirty_rows = connection.execute(
+            "SELECT code, dirty_status FROM base_dirty_instrument ORDER BY code"
+        ).fetchall()
+
+    assert codes == [("600000.SH",)]
+    assert dirty_rows == [("600000.SH", "pending")]
 
 
 def test_market_base_build_materializes_isolated_base_and_consumes_dirty_queue(tmp_path: Path) -> None:
@@ -143,6 +174,58 @@ def test_market_base_build_materializes_isolated_base_and_consumes_dirty_queue(t
     assert not settings.source_databases.market_base.exists()
 
 
+def test_stock_producer_target_audit_fails_on_raw_base_delta_and_passes_after_build(tmp_path: Path) -> None:
+    settings = _settings(tmp_path / "official")
+    source_root = _write_tdx_fixture(tmp_path / "tdx")
+    target_root = tmp_path / "isolated"
+    run_tdx_stock_raw_ingest(
+        settings=settings,
+        source_root=source_root,
+        target_data_root=target_root,
+        run_id="raw-test",
+    )
+
+    failed = audit_stock_producer_target(settings=settings, target_data_root=target_root)
+
+    assert failed.status == "failed"
+    assert failed.raw_base_code_delta["raw_only_codes"] == ("600000.SH",)
+    assert failed.gate_failures == ("day raw/base code delta is not empty.",)
+
+    run_market_base_build(
+        settings=settings,
+        target_data_root=target_root,
+        instruments=("600000.SH",),
+        run_id="base-test",
+    )
+    completed = audit_stock_producer_target(settings=settings, target_data_root=target_root)
+
+    assert completed.status == "completed"
+    assert completed.raw_base_code_delta["raw_only_codes"] == ()
+    assert completed.gate_failures == ()
+
+
+def test_stock_producer_rehearsal_runs_requested_scope_and_returns_gate_status(tmp_path: Path) -> None:
+    settings = _settings(tmp_path / "official")
+    source_root = _write_tdx_fixture(tmp_path / "tdx")
+    target_root = tmp_path / "isolated"
+
+    summary = run_data_stock_producer_rehearsal(
+        settings=settings,
+        source_root=source_root,
+        target_data_root=target_root,
+        scopes=(("day", "backward"),),
+        raw_limit=None,
+        base_limit=None,
+        run_id="rehearsal-test",
+    )
+
+    assert summary.status == "completed"
+    assert summary.gate_status == "completed"
+    assert summary.target_audit_summary.status == "completed"
+    assert len(summary.raw_summaries) == 1
+    assert len(summary.base_summaries) == 1
+
+
 def test_audit_data_source_fact_freeze_uses_read_only_connections(monkeypatch, tmp_path: Path) -> None:
     settings = _settings(tmp_path / "official")
     _write_source_fact_fixture(settings)
@@ -188,6 +271,34 @@ def _write_tdx_fixture(root: Path) -> Path:
                 "日期\t开盘\t最高\t最低\t收盘\t成交量\t成交额",
                 "2026/04/09\t10.00\t10.50\t9.80\t10.20\t1000\t2000",
                 "2026/04/10\t10.20\t10.80\t10.10\t10.70\t1100\t2200",
+                "数据来源: 通达信",
+            ]
+        ),
+        encoding="gbk",
+    )
+    return root
+
+
+def _write_tdx_fixture_with_non_stock_code(root: Path) -> Path:
+    source_dir = root / "stock-day" / "Non-Adjusted"
+    source_dir.mkdir(parents=True)
+    (source_dir / "SH#600000.txt").write_text(
+        "\n".join(
+            [
+                "600000 浦发银行 日线 不复权",
+                "日期\t开盘\t最高\t最低\t收盘\t成交量\t成交额",
+                "2026/04/10\t10.20\t10.80\t10.10\t10.70\t1100\t2200",
+                "数据来源: 通达信",
+            ]
+        ),
+        encoding="gbk",
+    )
+    (source_dir / "SH#510300.txt").write_text(
+        "\n".join(
+            [
+                "510300 沪深300ETF 日线 不复权",
+                "日期\t开盘\t最高\t最低\t收盘\t成交量\t成交额",
+                "2026/04/10\t4.20\t4.30\t4.10\t4.25\t1100\t2200",
                 "数据来源: 通达信",
             ]
         ),

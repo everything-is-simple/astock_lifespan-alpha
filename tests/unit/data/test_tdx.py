@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from astock_lifespan_alpha.data.tdx import parse_tdx_stock_file, resolve_adjust_method_folder, resolve_adjust_method_name
+from astock_lifespan_alpha.data.tdx import (
+    is_a_share_stock_code,
+    parse_tdx_stock_file,
+    resolve_adjust_method_folder,
+    resolve_adjust_method_name,
+)
 
 
 def test_tdx_adjust_method_folder_mapping_supports_official_folder_names() -> None:
@@ -14,6 +19,15 @@ def test_tdx_adjust_method_folder_mapping_supports_official_folder_names() -> No
     assert resolve_adjust_method_name("Backward-Adjusted") == "backward"
     assert resolve_adjust_method_name("Forward-Adjusted") == "forward"
     assert resolve_adjust_method_name("Non-Adjusted") == "none"
+
+
+def test_tdx_stock_code_classifier_accepts_a_share_stocks_and_rejects_etfs() -> None:
+    assert is_a_share_stock_code("600000.SH")
+    assert is_a_share_stock_code("000001.SZ")
+    assert is_a_share_stock_code("300750.SZ")
+    assert is_a_share_stock_code("688001.SH")
+
+    assert not is_a_share_stock_code("510300.SH")
 
 
 def test_parse_tdx_stock_file_maps_filename_folder_and_rows(tmp_path: Path) -> None:

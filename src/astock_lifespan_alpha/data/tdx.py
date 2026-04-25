@@ -54,6 +54,22 @@ def resolve_adjust_method_name(folder_name: str) -> str:
     return _ADJUST_METHOD_FOLDER_MAP[folder_name]
 
 
+def is_a_share_stock_code(code: str) -> bool:
+    """Return whether a normalized A-share code is stock, excluding ETFs/funds."""
+
+    candidate = str(code).strip().upper()
+    if "." not in candidate:
+        return False
+    symbol, exchange = candidate.split(".", 1)
+    if not symbol.isdigit() or len(symbol) != 6:
+        return False
+    if exchange == "SH":
+        return symbol.startswith(("600", "601", "603", "605", "688", "689"))
+    if exchange == "SZ":
+        return symbol.startswith(("000", "001", "002", "003", "300", "301"))
+    return False
+
+
 def parse_tdx_stock_file(path: Path) -> TdxParsedStockFile:
     lines = path.read_text(encoding="gbk").splitlines()
     if len(lines) < 2:

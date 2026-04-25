@@ -340,3 +340,13 @@ Stage-five implementation defaults are frozen for engineering:
 - `state_snapshot_sample` 已优先覆盖四个 `wave_position_zone`
 - forced audit `malf-day-semantic-audit-ad35dcbbae62`：7 项硬规则 `pass`，4 项软观察 `ok`
 - 当前 `malf = 放行`
+
+## Card 68 addendum
+
+- `68` data stock producer 硬化与复演已登记
+- 规格：`docs/02-spec/31-data-stock-producer-hardening-rehearsal-spec-v1-20260425.md`
+- 结论：`docs/03-execution/68-data-stock-producer-hardening-rehearsal-conclusion-20260425.md`
+- 新增 A 股 stock-only 门禁、isolated target audit 与 producer rehearsal runner
+- `510300.SH` 继续登记为老库 read-only audit anomaly，本卡不修补正式老库
+- 本卡不扩 index/block，不引入网络日更
+- pipeline 默认 `13` step 合同不变
