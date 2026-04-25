@@ -378,3 +378,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/66-data-stock-producer-safe-rebuild-conclusion-20260425.md`
 - 裁决：`已接受`
 - 说明：Card 66 恢复 stock-only `TDX offline -> isolated raw_market -> isolated market_base` producer，现有 `H:\Lifespan-data` 老库只允许 read-only audit；全量 `pytest = 146 passed`，pipeline 回归 `pipeline-f34d0b328c67` 已完成且默认 13 step 合同不变。
+
+### `67` run_id key boundary contract
+
+- 结论文档：`docs/03-execution/67-run-id-key-boundary-contract-conclusion-20260425.md`
+- 裁决：`已接受`
+- 说明：Card 67 将正式表分为 `ledger / checkpoint / queue / run_audit` 四类，并以契约测试冻结 `ledger / checkpoint` 主键不得包含 run lineage 字段；`*_work_queue` 正式解释为 per-run 执行痕迹，不承担断点续传账本职责。
