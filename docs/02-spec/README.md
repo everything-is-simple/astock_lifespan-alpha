@@ -71,6 +71,18 @@ Card 62 后，当前 gate 结论为：
 
 阶段规格不得反向改写 MALF 地基语义。若阶段规格与 MALF Canon 冲突，应以长期基准规格和最新已接受结论为准，再开新 card 修订历史口径或补记。
 
+## Data Producer 安全重建口径
+
+Card 66 后，`data` 的 producer 恢复采用安全隔离路线：
+
+1. 现有 `H:\Lifespan-data` source fact 老库只允许 read-only audit。
+2. 新 producer 默认写入 isolated `target_data_root`，不得原地写老库。
+3. 首轮只做 stock-only `TDX offline -> raw_market -> market_base`。
+4. 不引入网络数据源，不恢复 Tushare / TdxQuant / index / block。
+5. `pipeline` 继续保持现有 13 step，不默认触发 data producer。
+
+正式规格见 `docs/02-spec/30-data-stock-producer-safe-rebuild-freeze-spec-v1-20260425.md`。
+
 ## 下游消费边界
 
 下游模块只允许消费 MALF 已正式输出的结构事实：

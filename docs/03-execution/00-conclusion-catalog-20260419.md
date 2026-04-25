@@ -372,3 +372,9 @@ Stage-five implementation freeze addendum:
 - 结论文档：`docs/03-execution/62-malf-foundation-canon-import-and-zone-sampling-conclusion-20260424.md`
 - 裁决：`已接受，malf 放行`
 - 说明：Card 62 已新增 MALF Canon，修复 `malf` 包入口顶层加载 audit 依赖的问题，并将 `state_snapshot_sample` 选择改为优先覆盖四个 `wave_position_zone`。新增契约门 `6 passed`，MALF 单测 `30 passed`，文档契约 `4 passed`，模块边界 `4 passed`。forced audit `malf-day-semantic-audit-ad35dcbbae62` 直接命中 `day-e687a8277f61`，7 项硬规则全部 `pass`，4 项软观察全部 `ok`，`zone_coverage = ok (4)`，最终 `verdict = 通过`。
+
+### `66` data stock producer 安全重建
+
+- 结论文档：`docs/03-execution/66-data-stock-producer-safe-rebuild-conclusion-20260425.md`
+- 裁决：`已接受`
+- 说明：Card 66 恢复 stock-only `TDX offline -> isolated raw_market -> isolated market_base` producer，现有 `H:\Lifespan-data` 老库只允许 read-only audit；全量 `pytest = 146 passed`，pipeline 回归 `pipeline-f34d0b328c67` 已完成且默认 13 step 合同不变。
